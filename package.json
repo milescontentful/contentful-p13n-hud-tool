@@ -1,0 +1,12 @@
+{
+  "name": "contentful-p13n-hud-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Operator HUD for Contentful Personalization demos — signals → audience → decision trace → variant, with full preview-panel parity and no panel attached. Source-drop; see README.",
+  "peerDependencies": {
+    "@contentful/optimization-core": ">=1.2.0",
+    "@contentful/optimization-react-web": ">=1.2.0",
+    "contentful": ">=11",
+    "react": ">=18"
+  }
+}
