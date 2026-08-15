@@ -13,6 +13,11 @@ designed for storytelling instead of debugging.
 Lineage: PGE quiz HUD → HCA/ref-marketing `PersonalizationHud` (personas-as-content) → this
 generalized operator HUD (surface-generic, decision trace, SDK parity, `@contentful/optimization`).
 
+Snapshot of milescontentful/lg-display @ cb3e73f (2026-08-15).
+During active development the LG demo is canonical — refresh this repo with
+`./sync-from-lg.sh` (copies the three source files, rewrites imports, scrubs app-specific
+strings, and fails loudly if a new app-specific string escapes the scrub rules).
+
 ## What it shows
 
 - **Signals** — the distilled traits the personalization layer received (the host app's list;
