@@ -2,7 +2,7 @@
   "name": "contentful-p13n-hud-tool",
   "version": "0.2.0",
   "private": true,
-  "description": "Operator HUD for Contentful Personalization demos — signals → audience → decision trace → variant, with preview-panel parity (audience + variant forcing, live profile, reset). Ships as TypeScript source for Vite + React apps.",
+  "description": "Operator HUD for Contentful Personalization demos \u2014 signals \u2192 audience \u2192 decision trace \u2192 variant, with preview-panel parity (audience + variant forcing, live profile, reset). Ships as TypeScript source for Vite + React apps.",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -18,5 +18,10 @@
     "@contentful/optimization-react-web": ">=1.2.0 <3",
     "contentful": ">=11",
     "react": ">=18"
-  }
+  },
+  "license": "MIT",
+  "author": "Miles Stauffer (https://github.com/milescontentful)",
+  "contributors": [
+    "Claude (Anthropic) \u2014 AI pair programmer"
+  ]
 }

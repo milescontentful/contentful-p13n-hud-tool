@@ -226,3 +226,14 @@ decides itself (its own rules) follows the persona buttons instead.
 
 Issues and pull requests welcome. Personalization's SDK is young and moving fast — if something here
 stops matching what you see, open an issue with the SDK version and what the Experience API returned.
+
+## Credits
+
+Created by **[Miles Stauffer](https://github.com/milescontentful)**, built together with
+**[Claude](https://www.anthropic.com/claude)** (Anthropic) as an AI pair programmer.
+
+## License
+
+[MIT](LICENSE) © 2026 Miles Stauffer. Not an official Contentful product — an independent tool that
+uses Contentful's public Personalization SDK.
+
