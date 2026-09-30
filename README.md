@@ -5,9 +5,15 @@ page is showing what it's showing — in the order it happened:
 
 **① signals → ② audience → ③ decision trace → ④ selected variant (+ why)**
 
+![The HUD open beside the Meridian Outfitters home page: a ?utm_campaign=climb link has swapped the hero to "Built for the crux, not the catalog", and the panel shows the campaign signal, the climb audience, the decision trace with the Climbing rule matched, and the climbing hero as the selected variant](docs/images/meridian-climb.webp)
+
+*Meridian Outfitters (a fictional brand) with a `?utm_campaign=climb` link: the page swapped its hero, and the HUD shows why.*
+
 The decision trace is the part audiences remember: every rule, in order, marked
 **✓ matched · ✗ not matched · ∅ NO DATA** — because "we have no data on this visitor yet" is a
 different fact from "this visitor failed the rule", and saying so honestly is the trust moment.
+
+<img src="docs/images/decision-trace.webp" width="420" alt="Close-up of the decision trace: Climbing campaign rule matched (utm_campaign = climb from this page's URL, Experience API: audience joined); Family camping and Members rules not matched, each showing the value the rule wanted; the 50/50 A/B test matched with the half this visitor got">
 
 It also does the job of Contentful's standard preview panel (force an audience, force a variant,
 see the live profile, reset) by driving the **same official override engine** the panel uses —
@@ -109,6 +115,15 @@ sdk.page({ campaign })   // after the SDK is live — see the preflight checklis
 
 Open the link in a fresh (private) window each time — the profile remembers you.
 
+What it looks like — the same page, plain link vs campaign link:
+
+| Plain link — no campaign, so every rule reads **∅ NO DATA** | `?utm_campaign=climb` — the Climbing rule reads **✓ matched** |
+|---|---|
+| ![Meridian home page with the default hero "Gear for the long way around"; the HUD's decision trace marks all three campaign rules NO DATA and the selected variant is the baseline hero](docs/images/meridian-default.webp) | ![Meridian home page with the climbing hero "Built for the crux, not the catalog"; the HUD's decision trace marks the Climbing rule matched and the other two not matched](docs/images/meridian-climb.webp) |
+
+A persona whose only job is "show the default" can be passed with `audienceNtId: null` — picking it
+forces every other persona's audience off, even on a campaign link.
+
 ### Optional rows
 
 Every extra control appears **only when you wire it** — no buttons that do nothing:
@@ -121,6 +136,7 @@ Every extra control appears **only when you wire it** — no buttons that do not
 | Content source (fixtures vs Contentful) | `contentSource` + `onSetContentSource` |
 | Experience state / entry point | `experienceState` + `experienceStateOptions` + `onSetExperienceState` (same shape for `entryPoint…`) |
 | Open-in-Contentful link | `cfEntryId` |
+| Limit the Advanced "force a variant" list | `experienceFilter` |
 
 ### Personas as content (optional)
 
@@ -195,7 +211,12 @@ and `PreviewOverrideManager` (`…/preview-support`). No SDK on the page → the
 capability it doesn't have.
 
 Forced variants repaint anything rendered through the SDK's `<OptimizedEntry>`. Content your app
-decides itself (its own rules) follows the persona buttons instead.
+decides itself (its own rules) follows the persona buttons instead. When several experiences replace
+the same entry (three campaign heroes on one home hero), the last variant you click wins — the HUD
+clears the other experiences' overrides for that entry first. Use `experienceFilter` to hide
+experiences you don't want offered (the Preview API also returns unpublished, retired ones).
+
+![Advanced · force a variant open on the Meridian home page: V1 is forced on the Members campaign hero, the page shows the members hero "Your early access to the Fall Line starts tonight", and the selected-variant note says a preview override is showing it](docs/images/meridian-force-variant.webp)
 
 ## Files
 
