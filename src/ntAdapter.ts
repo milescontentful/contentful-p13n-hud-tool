@@ -148,6 +148,7 @@ function experienceIdsFor(audienceId: string): string[] {
  * reloads. No-op (returns false) when no SDK is mounted.
  */
 export function activatePersona(opts: {
+  /** omit for a baseline persona — every audience in allAudienceIds is forced off */
   audienceNtId?: string
   traitKey: string
   personaKey: string
@@ -156,9 +157,13 @@ export function activatePersona(opts: {
   const s = sdk()
   if (!s) return false
   const m = overrideManager()
-  if (m && opts.audienceNtId) {
+  if (m) {
     opts.allAudienceIds.forEach((a) => m.resetAudienceOverride(a))
-    m.activateAudience(opts.audienceNtId, experienceIdsFor(opts.audienceNtId))
+    if (opts.audienceNtId) m.activateAudience(opts.audienceNtId, experienceIdsFor(opts.audienceNtId))
+    // baseline persona (no audience): force every persona audience OFF, so the
+    // page shows the default even when this visitor naturally qualifies
+    // (e.g. demoing "Default visitor" on a ?utm_campaign= link)
+    else opts.allAudienceIds.forEach((a) => m.deactivateAudience(a, experienceIdsFor(a)))
   }
   // empty userId = anonymous identify carrying traits (same as the legacy call)
   void s.identify({ userId: '', traits: { [opts.traitKey]: opts.personaKey } }).catch(() => {
@@ -202,8 +207,33 @@ export function forceVariant(experienceId: string, variantIndex: number | null):
   const m = overrideManager()
   if (!m) return false
   if (variantIndex === null) m.resetOptimizationOverride(experienceId)
-  else m.setVariantOverride(experienceId, variantIndex)
+  else {
+    // Last click wins: when several experiences replace the SAME baseline entry
+    // (e.g. three campaign heroes on one home hero), an older override on a
+    // sibling — even "Base" — outranks the new one and the page doesn't move
+    // (observed on Meridian 2026-09-29). Clear the siblings' overrides first.
+    siblingExperienceIds(experienceId).forEach((id) => {
+      if (forcedVariantFor(id) !== null) m.resetOptimizationOverride(id)
+    })
+    m.setVariantOverride(experienceId, variantIndex)
+  }
   return true
+}
+
+/** Other experiences whose EntryReplacement components share a baseline entry
+ * with this one (read from the raw nt_experience entries' nt_config). */
+function siblingExperienceIds(experienceId: string): string[] {
+  type RawExp = { sys?: { id?: string }; fields?: { nt_experience_id?: string; nt_config?: { components?: { baseline?: { id?: string } }[] } } }
+  const raw = getP13nDefinitions().experienceEntries as RawExp[]
+  const idOf = (e: RawExp) => e.fields?.nt_experience_id ?? e.sys?.id ?? ''
+  const baselines = (e: RawExp) => (e.fields?.nt_config?.components ?? []).map((c) => c.baseline?.id).filter(Boolean)
+  const me = raw.find((e) => idOf(e) === experienceId || e.sys?.id === experienceId)
+  if (!me) return []
+  const mine = new Set(baselines(me))
+  return raw
+    .filter((e) => e !== me && baselines(e).some((b) => mine.has(b)))
+    .flatMap((e) => [idOf(e), e.sys?.id ?? ''])
+    .filter((id, i, a) => id && id !== experienceId && a.indexOf(id) === i)
 }
 
 /**

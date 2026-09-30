@@ -10,6 +10,7 @@ export {
   activatePersona,
   resetAll,
   readProfile,
+  subscribeProfile,
   forceVariant,
   resetProfile,
   getOverrides,

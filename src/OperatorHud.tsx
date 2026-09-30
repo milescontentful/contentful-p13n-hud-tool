@@ -39,8 +39,10 @@ export interface AudienceOption {
   label: string
   emoji: string
   color: string
-  /** nt_audience_id this persona forces (default `aud-<key>`) */
-  audienceNtId?: string
+  /** nt_audience_id this persona forces (default `aud-<key>`).
+   *  `null` = a baseline persona (e.g. "Default visitor"): picking it forces
+   *  every other persona's audience OFF, so the default content shows. */
+  audienceNtId?: string | null
 }
 
 export type ContentSource = 'fixture' | 'contentful-personalization'
@@ -206,11 +208,12 @@ export function OperatorHud(p: HudProps) {
   const sdkUp = sdkAvailable()
   const meta = personaOf(p.audience)
   // nt_audience_id per persona: content entry → prop → `aud-<key>` convention
-  const audienceIdOf = (key: string) =>
-    contentPersonas?.find((x) => x.key === key)?.audienceNtId ??
-    p.audienceOptions.find((o) => o.key === key)?.audienceNtId ??
-    `aud-${key}`
-  const allAudienceIds = p.audienceOptions.map((o) => audienceIdOf(o.key))
+  const audienceIdOf = (key: string): string | null => {
+    const opt = p.audienceOptions.find((o) => o.key === key)
+    if (opt?.audienceNtId === null) return null // baseline persona — forces no audience
+    return contentPersonas?.find((x) => x.key === key)?.audienceNtId ?? opt?.audienceNtId ?? `aud-${key}`
+  }
+  const allAudienceIds = p.audienceOptions.map((o) => audienceIdOf(o.key)).filter((a): a is string => !!a)
 
   // ---- live SDK state (preview-panel parity, gated on sdkUp) ----------------
   const [profile, setProfile] = useState<SdkProfile | null>(null)
@@ -259,7 +262,7 @@ export function OperatorHud(p: HudProps) {
   function switchAudience(key: string) {
     p.onSwitchAudience(key)
     activatePersona({
-      audienceNtId: audienceIdOf(key),
+      audienceNtId: audienceIdOf(key) ?? undefined,
       traitKey: p.traitKey,
       personaKey: key,
       allAudienceIds,

@@ -45,9 +45,12 @@ export interface P13nDefinitions {
   /** raw nt_experience entries — the override manager uses them to keep
    * inline-variable (flag) values in sync with forced variants */
   experienceEntries: unknown[]
+  /** raw nt_audience entries (fields incl. `nt_rules`) — lets a host build its
+   * decision trace from the REAL audience rules instead of a hand-typed copy */
+  audienceEntries: unknown[]
 }
 
-const EMPTY: P13nDefinitions = { audiences: [], experiences: [], audienceSysIdByAudienceId: {}, experienceEntries: [] }
+const EMPTY: P13nDefinitions = { audiences: [], experiences: [], audienceSysIdByAudienceId: {}, experienceEntries: [], audienceEntries: [] }
 
 declare global {
   interface Window {
@@ -77,6 +80,7 @@ export async function loadP13nDefinitions(): Promise<P13nDefinitions> {
       experiences: createExperienceDefinitions(experiences),
       audienceSysIdByAudienceId,
       experienceEntries: experiences.items as unknown[],
+      audienceEntries: audiences.items as unknown[],
     }
     window.__optimizationDefinitions = defs
     return defs
