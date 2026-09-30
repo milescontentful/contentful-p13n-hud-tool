@@ -1,107 +1,165 @@
 # Contentful P13n HUD
 
-An operator inspector for Contentful Personalization demos: a draggable dark-glass panel that
-shows the full causal chain of every personalization decision —
+**See the math.** An operator panel for Contentful Personalization demos that shows *why* the
+page is showing what it's showing — in the order it happened:
 
-**① signals → ② audience → ③ decision trace → ④ selected variant (+ why)** —
+**① signals → ② audience → ③ decision trace → ④ selected variant (+ why)**
 
-with live SDK state and every operator control a presenter needs. It **replaces the first-party
-preview panel entirely** (audience forcing, per-experience variant forcing, profile id,
-profile reset) by driving the same official override engine the panel uses, from a surface
-designed for storytelling instead of debugging.
+The decision trace is the part audiences remember: every rule, in order, marked
+**✓ matched · ✗ not matched · ∅ NO DATA** — because "we have no data on this visitor yet" is a
+different fact from "this visitor failed the rule", and saying so honestly is the trust moment.
 
-Lineage: PGE quiz HUD → HCA/ref-marketing `PersonalizationHud` (personas-as-content) → this
-generalized operator HUD (surface-generic, decision trace, SDK parity, `@contentful/optimization`).
+It also does the job of Contentful's standard preview panel (force an audience, force a variant,
+see the live profile, reset) by driving the **same official override engine** the panel uses —
+so you run one panel on screen, built for storytelling instead of debugging.
 
-Snapshot of milescontentful/lg-display @ cb3e73f (2026-08-15).
-During active development the LG demo is canonical — refresh this repo with
-`./sync-from-lg.sh` (copies the three source files, rewrites imports, scrubs app-specific
-strings, and fails loudly if a new app-specific string escapes the scrub rules).
+This repo is the master copy. It ships as TypeScript source for **Vite + React** apps.
 
-## What it shows
+---
 
-- **Signals** — the distilled traits the personalization layer received (the host app's list;
-  the framing: raw history stays in the warehouse, only the distillate crosses over)
-- **Audience** — resolved trait/audience with live SDK status; personas load from `demoPersona`
-  CONTENT entries in the space when connected, falling back to prop-supplied options
-- **Decision trace** — the host's deterministic rule evaluation, three-state:
-  matched ✓ · not matched ✗ · **NO DATA ∅** (an absent signal is not a failed rule)
-- **Selected variant** — with Contentful entry provenance ("this pixel came from this entry")
-  and a labeled Open-in-Contentful button
-- **Operator controls** — audience switch, entry point, personalization on/off, A/B preview,
-  locale, content source, experience state, reset
-- **SDK block** (only when the SDK is live) — profile id (click-to-copy), traits, matched
-  audiences, per-experience variant forcing chips (Auto/Base/V1), "Reset profile (forget me)"
+## 5-minute quick start
 
-Panel UX: draggable anywhere (position + collapse state persist in sessionStorage), minimize
-pill, Esc closes, collapsible numbered sections.
+**1. Install** (plus the SDK pieces you probably already have):
 
-## SDK coupling
+```sh
+npm install github:milescontentful/contentful-p13n-hud-tool
+npm install @contentful/optimization-react-web @contentful/optimization-core contentful
+```
 
-Built for **`@contentful/optimization-react-web` ≥ 1.2.0**. All SDK access lives in
-`src/ntAdapter.ts` (two host-facing touchpoints: `activatePersona` / `resetAll`, plus the
-widget-parity extras) via the official surface — `window.contentfulOptimization`,
-`getPreviewPanelBridge` (`@contentful/optimization-core/bridge-support`), and
-`PreviewOverrideManager` (`.../preview-support`). `src/optimization.ts` loads the
-`nt_audience`/`nt_experience` graph with the SDK's own mappers (preview host, so draft
-variants resolve).
+**2. Point it at your space** — add to `.env.local` (Vite):
 
-Everything degrades honestly: no SDK mounted → the audience block says
-"SDK not detected — local decisioning" and all SDK-only UI stays hidden. No credentials →
-personas fall back to props. The HUD never fakes a capability it doesn't have.
+```
+VITE_CONTENTFUL_SPACE_ID=<your space id>
+VITE_CONTENTFUL_PREVIEW_TOKEN=<Content Preview API token>
+VITE_CONTENTFUL_ENVIRONMENT_ID=master          # optional, default master
+```
 
-Two migration landmines this code already solves (found by observation, 2026-08-15):
-1. The initial page event silently no-ops against the SDK's pre-live snapshot runtime — the
-   host must wait for the live SDK (`useOptimizationContext()`) before `trackPageView()`.
-2. The SDK's mappers use two id spaces — `AudienceDefinition.id` is the `nt_audience_id`
-   field, but `ExperienceDefinition.audience.id` is the entry **sys id**. `optimization.ts`
-   carries the bridge map.
+Or in code: `configureP13nHud({ spaceId, environment, previewToken })` once at boot.
+With nothing set, the HUD still runs on the personas you pass as props and says so on screen.
 
-## Integration (source-drop)
-
-This is a source drop, not (yet) an npm package: copy `src/` into your app and wire the props.
+**3. Load the audience/experience list once** (in `main.tsx`, next to your `<OptimizationRoot>`):
 
 ```tsx
+import { loadP13nDefinitions } from 'contentful-p13n-hud-tool'
+void loadP13nDefinitions() // reads nt_audience / nt_experience (drafts included) for the forcing controls
+```
+
+**4. Drop the HUD on the page** (the ~10 lines that matter):
+
+```tsx
+import { OperatorHud } from 'contentful-p13n-hud-tool'
+
 <OperatorHud
-  surface="My Storefront"
-  audience={audienceKey}
-  audienceOptions={[{ key, label, emoji, color }, …]}
-  traitKey="shopperArchetype"
-  selectedVariant={exp.selectedVariant}
-  decisionReason={exp.decisionReason}
-  trace={exp.trace}                 // optional TraceStep[]
-  signals={signalsForAudience}
-  locale={locale} timeOfDay={timeOfDay}
-  contentSource={source} experienceState={view}
-  p13nOn={p13nOn} preview={preview}
-  cfEntryId={entryId}               // optional: powers Open-in-Contentful
-  entryPoint={entry} onSetEntryPoint={setEntry}   // optional row
-  onSwitchAudience={…} onSetLocale={…} onSetContentSource={…}
-  onSetExperienceState={…} onSetP13n={…} onSetPreview={…} onReset={…}
+  surface="My Site"
+  audience={personaKey}                          // which persona is active now
+  audienceOptions={[{ key: 'returning', label: 'Returning', emoji: '⭐', color: '#F59E0B' }]}
+  traitKey="segment"                             // profile trait the persona sets
+  selectedVariant={variantName}
+  decisionReason="Returning-customer rule matched."
+  trace={[{ rule: 'Page views ≥ 3', outcome: 'matched', detail: 'pageViews = 5' }]}
+  signals={[{ q: 'Page views this session', a: '5' }]}
+  onSwitchAudience={setPersonaKey}
+  onReset={() => setPersonaKey('new-visitor')}
 />
 ```
 
-Env (Vite): `VITE_CONTENTFUL_SPACE_ID`, `VITE_CONTENTFUL_PREVIEW_TOKEN`, optional
-`VITE_CONTENTFUL_ENVIRONMENT_ID` (personas + entry links + definitions loader).
+Mark the personalized element with `data-p13n-target` so the **Highlight** button can pulse it.
 
-Peer expectations: React 18, the optimization SDK mounted by the host (see the reference
-consumer's `main.tsx`), `contentful` (for the definitions loader).
+**What you see:** a "Contentful HUD" pill bottom-right. Click it → the four numbered steps, the
+operator controls, and (when the Optimization SDK is running on the page) the live profile plus a
+closed-by-default **Advanced · force a variant** section. Drag it anywhere; it remembers where you
+left it and which sections were folded, even across a reload. Esc closes it.
 
-The host page should mark its personalized element with `data-p13n-target` (the Highlight
-button pulses it) and register no other p13n UI — the HUD is designed to be the single
-source of truth on screen; don't attach `@contentful/optimization-web-preview-panel`
-alongside it.
+### Optional rows
 
-## Reference consumer
+Every extra control appears **only when you wire it** — no buttons that do nothing:
 
-`milescontentful/lg-display` (private) — a webOS TV demo with two surfaces (gaming +
-commerce) driving this HUD, including a deterministic rule engine that emits the decision
-trace and micro-personalizations (abandoned cart, brand-affinity sale, replenishment).
+| Row | Pass |
+|---|---|
+| Personalization on/off | `p13nOn` + `onSetP13n` |
+| A/B preview (control vs personalized) | `preview` + `onSetPreview` |
+| Locale | `locale` + `localeOptions` + `onSetLocale` |
+| Content source (fixtures vs Contentful) | `contentSource` + `onSetContentSource` |
+| Experience state / entry point | `experienceState` + `experienceStateOptions` + `onSetExperienceState` (same shape for `entryPoint…`) |
+| Open-in-Contentful link | `cfEntryId` |
 
-## Generalization TODOs
+### Personas as content (optional)
 
-- `EntryPoint`/`ENTRY_META` in `types.ts` still carry the reference demo's example values —
-  make the entry-point row fully prop-driven
-- Package as an npm module with proper peerDependencies
-- The persona content type id (`demoPersona`) and locale strings are conventions from the
-  source platform; make them configurable
+If the space has `demoPersona` entries (`personaKey`, `label`, `traitKey`, optional
+`audienceNtId`, `emoji`, `color`, `description`), the HUD reads labels/colours from them, so
+editors can rename personas without a code change. Content type id is configurable
+(`configureP13nHud({ personaContentType })`). Each persona forces the audience whose
+`nt_audience_id` is `audienceNtId` — or `aud-<personaKey>` by convention.
+
+---
+
+## Preflight checklist (the landmines)
+
+Both of the first two were found by watching real pages fail silently — nothing errors, the swap
+just never happens.
+
+- [ ] **Fire the first page event after the SDK is live.** A `page()` call made during the first
+  render hits a placeholder and does nothing. Wait for `useOptimizationContext()` to report the
+  live SDK, then call `sdk.page()`.
+- [ ] **Two id spaces for audiences.** The SDK's `AudienceDefinition.id` is the `nt_audience_id`
+  *field*, but `ExperienceDefinition.audience.id` is the audience entry's *sys id*.
+  `loadP13nDefinitions()` builds the bridge between them; if you roll your own loader, do the same.
+- [ ] **Load definitions from the Preview API.** Variant entries are often drafts; the Delivery
+  API silently drops them, so forcing controls would show nothing.
+- [ ] **Don't attach `@contentful/optimization-web-preview-panel` as well.** Two panels driving
+  one override engine will fight.
+- [ ] **SDK v2 renamed the root prop:** `<OptimizationRoot clientId=…>` is now `spaceId=…`.
+  The HUD itself works with SDK 1.2+ and 2.x (type-checked against both).
+
+---
+
+## vs. the standard preview panel
+
+Compared with `@contentful/optimization-web-preview-panel` 2.0.1 (the official panel, Sept 2026):
+
+**What the HUD adds**
+- **Decision trace** with a three-state outcome (matched / not matched / NO DATA) — the panel
+  shows *what* is on, never *why*.
+- **Signals** block — what the personalization layer received, in plain language.
+- **Selected variant + reason + provenance** — which Contentful entry produced the pixels, with an
+  Open-in-Contentful button.
+- **Live profile** — profile id, traits, matched audiences (the panel shows none of this).
+- **Personas as content**, one-click persona switching (forces the audience *and* sets the trait
+  via `identify()` so it survives a reload), highlight-the-change, full "forget me" reset.
+- Presenter UX: draggable, collapsible, remembers layout, dark theme for screen shares.
+
+**Where the panel is still ahead**
+- Fuzzy **search** across audience/experience names.
+- Every audience listed with a three-way **Off / Default / On** switch (the HUD forces *on* only,
+  and only for your personas).
+- **"You naturally qualify"** markers on audiences and variants.
+- Variant **names and traffic %** shown inline (the HUD puts them in tooltips).
+- Forced variants **survive a reload** (the panel saves them; the HUD's are cleared on reload).
+- CSP nonce option.
+
+Both drive the same engine (`PreviewOverrideManager`) and both tell the SDK "a preview panel is
+open", which makes forced variants repaint immediately.
+
+---
+
+## How it talks to the SDK
+
+All SDK access lives in `src/ntAdapter.ts`, using only official surface:
+`window.contentfulOptimization`, `getPreviewPanelBridge` (`@contentful/optimization-core/bridge-support`)
+and `PreviewOverrideManager` (`…/preview-support`). No SDK on the page → the audience block reads
+"SDK not detected — local decisioning" and all SDK-only UI stays hidden. The HUD never fakes a
+capability it doesn't have.
+
+Forced variants repaint anything rendered through the SDK's `<OptimizedEntry>`. Content your app
+decides itself (its own rules) follows the persona buttons instead.
+
+## Files
+
+| File | What it does |
+|---|---|
+| `src/OperatorHud.tsx` | the panel |
+| `src/ntAdapter.ts` | every SDK call (persona activation, forcing, profile, reset) |
+| `src/optimization.ts` | loads nt_audience / nt_experience with the SDK's own mappers |
+| `src/personas.ts` | optional `demoPersona` content loader |
+| `src/config.ts` | connection settings (env vars or `configureP13nHud`) |
+| `src/index.ts` | public exports |

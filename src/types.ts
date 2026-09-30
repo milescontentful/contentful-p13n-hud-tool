@@ -1,15 +1,15 @@
 // Shared types for the OperatorHud. In a consuming app these usually live in
 // your domain layer — they're gathered here so the tool is self-contained.
 
-export type TimeOfDay = 'morning' | 'afternoon' | 'evening' | 'late-night'
-
-// A signal the personalization layer received — phrased as observation → value.
-// In the source demo these are distilled TRAITS (the warehouse keeps raw
-// history; only the distillate crosses to the p13n layer).
-export interface TvSignal {
+// A signal the personalization layer received — phrased as observation → value
+// (e.g. { q: 'Visited pricing page', a: '3 times' }). Ideally distilled traits:
+// raw history stays in your warehouse, only the distillate crosses over.
+export interface HudSignal {
   q: string // the signal name, phrased as what was observed
   a: string // the observed value
 }
+/** @deprecated old name, kept for existing consumers */
+export type TvSignal = HudSignal
 
 // One evaluated rule in the deterministic decision trace. Three states, never
 // two: an absent signal (no-data) is not the same as a rule that failed.
@@ -19,13 +19,8 @@ export interface TraceStep {
   detail: string
 }
 
-// Entry points — EXAMPLE values from the source demo (a TV shopping journey).
-// Replace with your app's own entry vocabulary; the HUD only renders whatever
-// keys exist here when the entryPoint/onSetEntryPoint props are provided.
-export type EntryPoint = 'storefront' | 'drama-show' | 'sports-broadcast'
-
-export const ENTRY_META: Record<EntryPoint, { label: string; emoji: string }> = {
-  storefront: { label: 'Storefront', emoji: '🏬' },
-  'drama-show': { label: 'Drama show (shoppable scene)', emoji: '🎬' },
-  'sports-broadcast': { label: 'Sports broadcast', emoji: '🏟' },
+// One option in a segmented control row (locale, entry point, experience state…)
+export interface SegOption<T extends string = string> {
+  v: T
+  label: string
 }

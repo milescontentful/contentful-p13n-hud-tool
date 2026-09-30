@@ -1,34 +1,33 @@
-// OperatorHud — the "how did the TV decide this" inspector.
-// LG evolution of custom-demos' PersonalizationHud (HCA/ref-marketing): same
-// dark-glass visual language, but prop-driven and SURFACE-GENERIC: the Gaming
-// Portal passes tvProfile personas, ShopTime passes shopperArchetype options —
-// the HUD doesn't care.
-// The panel reads top-to-bottom as the causal chain:
+// OperatorHud — the "how did the page decide this" inspector for Contentful
+// Personalization demos. Prop-driven and SURFACE-GENERIC: the host passes its
+// personas/options and the HUD renders the causal chain top-to-bottom:
 //   1 signals → 2 audience → 3 decision trace → 4 selected variant (+ why)
-// with a DECISION TRACE whose outcomes are three-state (matched / not matched /
-// NO DATA) — an anonymous household is not a failed rule, and showing that
-// honestly is the trust moment with the Korea team.
+// The DECISION TRACE is three-state (matched / not matched / NO DATA) — an
+// anonymous visitor is not a failed rule, and showing that honestly is the
+// trust moment in a demo ("see the math").
 // This HUD is THE p13n control surface on screen: it replaces the Contentful
-// Optimization preview panel entirely (the panel package is deliberately NOT
-// attached), so it also carries the panel's powers when the SDK is live
-// (profile id, per-experience variant forcing, profile reset). All of that is
-// gated behind sdkAvailable() — the fixtures-only run never sees it.
-// ALL SDK coupling stays in ../personalization/ntAdapter.
+// Optimization preview panel (don't attach both), so it also carries the
+// panel's powers when the SDK is live (profile, per-experience variant
+// forcing, profile reset). All of that is gated behind sdkAvailable().
+// ALL SDK coupling stays in ./ntAdapter.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { TimeOfDay, TvSignal } from './types'
-import { ENTRY_META, type EntryPoint, type TraceStep } from './types'
+import type { HudSignal, SegOption, TraceStep } from './types'
 import {
   sdkAvailable,
   activatePersona,
   resetAll,
   readProfile,
   subscribeProfile,
+  subscribeOverrides,
+  forcedVariantFor,
+  setPreviewPanelOpen,
   forceVariant as sdkForceVariant,
   resetProfile as sdkResetProfile,
   type SdkProfile,
 } from './ntAdapter'
 import { getP13nDefinitions } from './optimization'
 import { fetchPersonas, type ContentPersona } from './personas'
+import { hudConfig } from './config'
 
 const ACCENT = '#00B8C4'
 const AMBER = '#F59E0B'
@@ -40,34 +39,47 @@ export interface AudienceOption {
   label: string
   emoji: string
   color: string
+  /** nt_audience_id this persona forces (default `aud-<key>`) */
+  audienceNtId?: string
 }
 
+export type ContentSource = 'fixture' | 'contentful-personalization'
+
 export interface HudProps {
-  surface: string // 'gaming' | 'shop' — display only
+  /** display label for the page/app the HUD sits on */
+  surface: string
+  /** currently active persona key */
   audience: string
   audienceOptions: AudienceOption[]
-  traitKey: string // tvProfile | shopperArchetype
+  /** profile trait the persona sets via identify(), e.g. 'segment' */
+  traitKey: string
   selectedVariant: string
   decisionReason: string
+  /** optional deterministic rule trace — the "see the math" block */
   trace?: TraceStep[]
-  signals: TvSignal[]
-  locale: string
-  timeOfDay: TimeOfDay
-  contentSource: 'fixture' | 'contentful-personalization'
-  experienceState: string
-  p13nOn: boolean
-  preview: 'personalized' | 'control'
-  cfEntryId?: string
-  // shop surface only: the entry-point signal is operator-driven from here
-  entryPoint?: EntryPoint
-  onSetEntryPoint?: (e: EntryPoint) => void
+  signals: HudSignal[]
   onSwitchAudience: (key: string) => void
-  onSetLocale: (l: string) => void
-  onSetContentSource: (s: 'fixture' | 'contentful-personalization') => void
-  onSetExperienceState: (s: string) => void
-  onSetP13n: (on: boolean) => void
-  onSetPreview: (p: 'personalized' | 'control') => void
   onReset: () => void
+  // ---- optional context rows (shown only when supplied) --------------------
+  locale?: string
+  timeOfDay?: string
+  cfEntryId?: string
+  // ---- optional operator rows: each renders only when its handler (and,
+  // where needed, its options) are passed — no dead buttons on screen -------
+  p13nOn?: boolean
+  onSetP13n?: (on: boolean) => void
+  preview?: 'personalized' | 'control'
+  onSetPreview?: (p: 'personalized' | 'control') => void
+  localeOptions?: SegOption[]
+  onSetLocale?: (l: string) => void
+  contentSource?: ContentSource
+  onSetContentSource?: (s: ContentSource) => void
+  experienceState?: string
+  experienceStateOptions?: SegOption[]
+  onSetExperienceState?: (s: string) => void
+  entryPoint?: string
+  entryPointOptions?: SegOption[]
+  onSetEntryPoint?: (e: string) => void
 }
 
 // ---- Optimization SDK surface -----------------------------------------------
@@ -77,7 +89,7 @@ export interface HudProps {
 // nt_experience mappers via getP13nDefinitions().
 
 // ---- HUD state persistence (survive reloads mid-demo) -----------------------
-const HUD_STORE_KEY = 'lg-operator-hud'
+const HUD_STORE_KEY = 'p13n-operator-hud'
 type HudStored = { pos?: { x: number; y: number } | null; collapsed?: Record<string, boolean> }
 function loadHudState(): HudStored {
   try {
@@ -193,16 +205,19 @@ export function OperatorHud(p: HudProps) {
   }
   const sdkUp = sdkAvailable()
   const meta = personaOf(p.audience)
-  // aud-<key> is apply-p13n's deterministic nt_audience_id convention;
-  // content personas may carry an explicit override
-  const allAudienceIds = p.audienceOptions.map(
-    (o) => contentPersonas?.find((x) => x.key === o.key)?.audienceNtId ?? `aud-${o.key}`,
-  )
+  // nt_audience_id per persona: content entry → prop → `aud-<key>` convention
+  const audienceIdOf = (key: string) =>
+    contentPersonas?.find((x) => x.key === key)?.audienceNtId ??
+    p.audienceOptions.find((o) => o.key === key)?.audienceNtId ??
+    `aud-${key}`
+  const allAudienceIds = p.audienceOptions.map((o) => audienceIdOf(o.key))
 
   // ---- live SDK state (preview-panel parity, gated on sdkUp) ----------------
   const [profile, setProfile] = useState<SdkProfile | null>(null)
-  // per-experience forced variant: undefined/null = auto (SDK decides)
-  const [forced, setForced] = useState<Record<string, number | null>>({})
+  // forced-variant chips read the REAL override state (so audience switches
+  // and resets show up too) — this counter just triggers a re-render
+  const [, setOverrideTick] = useState(0)
+  useEffect(() => subscribeOverrides(() => setOverrideTick((t) => t + 1)), [])
   useEffect(() => {
     if (!open || !sdkUp) return
     setProfile(readProfile())
@@ -210,19 +225,26 @@ export function OperatorHud(p: HudProps) {
     const unsub = subscribeProfile(setProfile)
     return () => unsub?.()
   }, [open, sdkUp])
+  // tell the SDK a preview panel is open → it repaints forced variants live
+  // (same signal the official panel sends; see ntAdapter.setPreviewPanelOpen)
+  useEffect(() => {
+    if (!sdkUp) return
+    setPreviewPanelOpen(open)
+    return () => {
+      setPreviewPanelOpen(false)
+    }
+  }, [open, sdkUp])
 
   function forceVariant(expId: string, idx: number | null) {
     // writes the SDK's real selected-optimizations override (the same engine
     // the first-party preview panel drives)
-    if (!sdkForceVariant(expId, idx)) return
-    setForced((f) => ({ ...f, [expId]: idx }))
+    sdkForceVariant(expId, idx)
   }
 
   async function resetProfile() {
     // clears overrides, forgets the anonymous id, fires a page event so a
-    // FRESH profile is fetched (SPA lesson) — all inside the adapter
+    // FRESH profile is fetched — all inside the adapter
     if (!(await sdkResetProfile())) return
-    setForced({})
     setProfile(readProfile())
   }
 
@@ -236,9 +258,8 @@ export function OperatorHud(p: HudProps) {
 
   function switchAudience(key: string) {
     p.onSwitchAudience(key)
-    const cp = contentPersonas?.find((x) => x.key === key)
     activatePersona({
-      audienceNtId: cp?.audienceNtId ?? `aud-${key}`,
+      audienceNtId: audienceIdOf(key),
       traitKey: p.traitKey,
       personaKey: key,
       allAudienceIds,
@@ -312,7 +333,14 @@ export function OperatorHud(p: HudProps) {
   const traceCount = p.trace?.length ?? 0
   const variantStepNo = traceCount > 0 ? 4 : 3
   // experience graph mapped by the SDK's own nt_experience mappers
-  const experiences = sdkUp ? getP13nDefinitions().experiences : []
+  const defs = getP13nDefinitions()
+  const experiences = sdkUp ? defs.experiences : []
+  const audienceName = (id: string) =>
+    defs.audiences.find((a) => a.id === id || defs.audienceSysIdByAudienceId[a.id] === id)?.name ?? id
+  const cfg = hudConfig()
+  // "Advanced" (variant forcing) is closed unless the operator opened it
+  const advancedOpen = collapsed.advanced === false
+  const extraSignals = (p.timeOfDay ? 1 : 0) + (p.locale ? 1 : 0)
 
   return (
     <div ref={boxRef} style={{ ...s.panel, ...anchor }}>
@@ -326,7 +354,7 @@ export function OperatorHud(p: HudProps) {
       >
         <div>
           <div style={s.title}>
-            <span style={{ ...s.dot, background: p.p13nOn ? GREEN : AMBER }} />
+            <span style={{ ...s.dot, background: p.p13nOn === false ? AMBER : GREEN }} />
             Contentful HUD
             {sdkUp && (
               <span style={s.liveChip} title="Contentful Optimization SDK mounted on this page — this HUD is its control surface">
@@ -342,8 +370,8 @@ export function OperatorHud(p: HudProps) {
       </div>
 
       <div style={s.body}>
-        {/* 1 — signals the logged-in TV holds */}
-        {stepHead(1, 'Signals received', <span style={s.countBadge}>{p.signals.length + 2}</span>, 'signals')}
+        {/* 1 — signals the personalization layer received */}
+        {stepHead(1, 'Signals received', <span style={s.countBadge}>{p.signals.length + extraSignals}</span>, 'signals')}
         {!collapsed.signals && (
           <div style={s.signalList}>
             {p.signals.map((sig, i) => (
@@ -354,14 +382,18 @@ export function OperatorHud(p: HudProps) {
                 </span>
               </div>
             ))}
-            <div style={s.signalRow}>
-              <span style={s.signalQ}>Time of day (context)</span>
-              <span style={{ ...s.chip, color: ACCENT, borderColor: `${ACCENT}66` }}>{p.timeOfDay}</span>
-            </div>
-            <div style={s.signalRow}>
-              <span style={s.signalQ}>Locale</span>
-              <span style={{ ...s.chip, color: ACCENT, borderColor: `${ACCENT}66` }}>{p.locale}</span>
-            </div>
+            {p.timeOfDay && (
+              <div style={s.signalRow}>
+                <span style={s.signalQ}>Time of day (context)</span>
+                <span style={{ ...s.chip, color: ACCENT, borderColor: `${ACCENT}66` }}>{p.timeOfDay}</span>
+              </div>
+            )}
+            {p.locale && (
+              <div style={s.signalRow}>
+                <span style={s.signalQ}>Locale</span>
+                <span style={{ ...s.chip, color: ACCENT, borderColor: `${ACCENT}66` }}>{p.locale}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -450,7 +482,7 @@ export function OperatorHud(p: HudProps) {
           </div>
           <div style={s.why}>{p.decisionReason}</div>
           {/* provenance: this pixel came from this entry */}
-          {p.contentSource === 'contentful-personalization' && p.cfEntryId ? (
+          {p.contentSource !== 'fixture' && p.cfEntryId && cfg.spaceId ? (
             <div style={s.entryFoot}>
               <div style={{ minWidth: 0 }}>
                 <div style={s.entryFootLabel}>Contentful source entry</div>
@@ -459,7 +491,7 @@ export function OperatorHud(p: HudProps) {
                 </code>
               </div>
               <a
-                href={`https://app.contentful.com/spaces/${import.meta.env.VITE_CONTENTFUL_SPACE_ID}/environments/${import.meta.env.VITE_CONTENTFUL_ENVIRONMENT_ID ?? 'master'}/entries/${p.cfEntryId}`}
+                href={`https://app.contentful.com/spaces/${cfg.spaceId}/environments/${cfg.environment}/entries/${p.cfEntryId}`}
                 target="_blank"
                 rel="noreferrer"
                 style={s.cfBtn}
@@ -470,8 +502,9 @@ export function OperatorHud(p: HudProps) {
           ) : (
             <div style={s.entryFoot}>
               <div style={s.entryFootHint}>
-                Served from local fixtures — flip <b>Content source → Contentful</b> below and this hero renders from a
-                live entry.
+                {p.contentSource === 'fixture'
+                  ? 'Served from local fixtures — flip Content source → Contentful below and this renders from a live entry.'
+                  : 'No source entry id passed (cfEntryId) — provenance link unavailable.'}
               </div>
             </div>
           )}
@@ -479,13 +512,13 @@ export function OperatorHud(p: HudProps) {
 
         <div style={s.divider} />
 
-        {/* operator controls — every one changes the TV surface visibly */}
+        {/* operator controls — each row appears only when the host wires it */}
         {stepHead(null, 'Operator controls', undefined, 'controls')}
         {!collapsed.controls && (
           <div style={s.ctrlBox}>
             {row(
               'Audience',
-              <div style={{ display: 'flex', gap: 5 }}>
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {p.audienceOptions.map((o) => {
                   const m = personaOf(o.key)
                   const on = p.audience === o.key
@@ -506,81 +539,61 @@ export function OperatorHud(p: HudProps) {
                 })}
               </div>,
             )}
-            {p.entryPoint &&
+            {p.entryPoint !== undefined &&
+              !!p.entryPointOptions?.length &&
               p.onSetEntryPoint &&
+              row('Entry point', seg(p.entryPoint, p.entryPointOptions, p.onSetEntryPoint))}
+            {p.onSetP13n &&
               row(
-                'Entry point',
-                seg(
-                  p.entryPoint,
-                  (Object.keys(ENTRY_META) as EntryPoint[]).map((e) => ({
-                    v: e,
-                    label: `${ENTRY_META[e].emoji} ${ENTRY_META[e].label.split(' ')[0]}`,
-                  })),
-                  p.onSetEntryPoint,
+                'Personalization',
+                seg(p.p13nOn === false ? 'off' : 'on', [{ v: 'on', label: 'On' }, { v: 'off', label: 'Off' }], (v) =>
+                  p.onSetP13n?.(v === 'on'),
                 ),
               )}
-            {row(
-              'Personalization',
-              seg(p.p13nOn ? 'on' : 'off', [{ v: 'on', label: 'On' }, { v: 'off', label: 'Off' }], (v) => p.onSetP13n(v === 'on')),
-            )}
-            {row(
-              'Preview',
-              seg(
-                p.preview,
-                [
-                  { v: 'control', label: 'A · Control' },
-                  { v: 'personalized', label: 'B · Personalized' },
-                ],
-                p.onSetPreview,
-              ),
-            )}
-            {row(
-              'Locale',
-              seg(
-                p.locale,
-                [
-                  { v: 'en-US', label: 'en-US' },
-                  { v: 'ko-KR', label: 'ko-KR' },
-                  { v: 'de-DE', label: 'de-DE' },
-                ],
-                p.onSetLocale,
-              ),
-            )}
-            {row(
-              'Content source',
-              seg(
-                p.contentSource,
-                [
-                  { v: 'fixture', label: 'Fixtures' },
-                  { v: 'contentful-personalization', label: 'Contentful' },
-                ],
-                p.onSetContentSource,
-              ),
-            )}
-            {row(
-              'Experience state',
-              seg(
-                p.experienceState,
-                [
-                  { v: 'gaming', label: 'Gaming' },
-                  { v: 'commerce', label: 'ShopTime' },
-                  { v: 'home', label: 'Home' },
-                ],
-                p.onSetExperienceState,
-              ),
-            )}
+            {p.onSetPreview &&
+              row(
+                'Preview',
+                seg(
+                  p.preview ?? 'personalized',
+                  [
+                    { v: 'control', label: 'A · Control' },
+                    { v: 'personalized', label: 'B · Personalized' },
+                  ],
+                  p.onSetPreview,
+                ),
+              )}
+            {p.locale !== undefined &&
+              !!p.localeOptions?.length &&
+              p.onSetLocale &&
+              row('Locale', seg(p.locale, p.localeOptions, p.onSetLocale))}
+            {p.contentSource && p.onSetContentSource &&
+              row(
+                'Content source',
+                seg(
+                  p.contentSource,
+                  [
+                    { v: 'fixture', label: 'Fixtures' },
+                    { v: 'contentful-personalization', label: 'Contentful' },
+                  ],
+                  p.onSetContentSource,
+                ),
+              )}
+            {p.experienceState !== undefined &&
+              !!p.experienceStateOptions?.length &&
+              p.onSetExperienceState &&
+              row('Experience state', seg(p.experienceState, p.experienceStateOptions, p.onSetExperienceState))}
             <button style={s.resetBtn} onClick={reset}>
               ⟲ Reset to baseline
             </button>
           </div>
         )}
 
-        {/* Optimization SDK — preview-panel parity, only when the SDK is mounted */}
+        {/* Live SDK profile — only when the SDK is mounted */}
         {sdkUp && (
           <>
             {stepHead(
               null,
-              'Optimization SDK',
+              'Live profile (SDK)',
               <span style={{ fontSize: 9.5, fontWeight: 800, color: GREEN }}>replaces the preview panel</span>,
               'sdk',
             )}
@@ -599,7 +612,7 @@ export function OperatorHud(p: HudProps) {
                 <div style={s.ctrlRow}>
                   <span style={s.ctrlLabel}>Audiences</span>
                   <span style={s.sdkVal}>
-                    {profile?.audiences?.length ? profile.audiences.join(', ') : 'none matched yet'}
+                    {profile?.audiences?.length ? profile.audiences.map(audienceName).join(', ') : 'none matched yet'}
                   </span>
                 </div>
                 <div style={s.ctrlRow}>
@@ -612,55 +625,70 @@ export function OperatorHud(p: HudProps) {
                       : 'none'}
                   </span>
                 </div>
-                {experiences.length > 0 && (
-                  <div>
-                    <div style={{ ...s.entryFootLabel, marginBottom: 6 }}>
-                      Force experience variants ({experiences.length} mapped)
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {experiences.map((e) => {
-                        // distribution includes index 0 (baseline); chips beyond it
-                        const nVariants = e.distribution.filter((d) => d.index > 0).length
-                        const f = forced[e.id] ?? null
-                        const chip = (label: string, idx: number | null) => (
-                          <button
-                            key={String(idx)}
-                            onClick={() => forceVariant(e.id, idx)}
-                            style={{ ...s.segBtn, ...(f === idx ? s.segOn : null), padding: '2px 7px', fontSize: 9.5 }}
-                            title={
-                              idx === null
-                                ? 'Let the SDK decide (reset override)'
-                                : idx === 0
-                                  ? 'Force the baseline'
-                                  : `Force variant ${idx}`
-                            }
-                          >
-                            {label}
-                          </button>
-                        )
-                        return (
-                          <div key={e.id} style={s.ctrlRow}>
-                            <span style={{ ...s.ctrlLabel, fontSize: 10 }} title={e.id}>
-                              {(e.name ?? e.id).replace(/^\[P13n\]\s*/, '')}
-                            </span>
-                            <div style={{ display: 'flex', gap: 4 }}>
-                              {chip('Auto', null)}
-                              {chip('Base', 0)}
-                              {Array.from({ length: nVariants }, (_, i) => chip(`V${i + 1}`, i + 1))}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    <div style={{ marginTop: 6, fontSize: 9.5, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>
-                      Writes the SDK preview override — page pixels follow the Audience control above.
-                    </div>
-                  </div>
-                )}
                 <button style={s.resetBtn} onClick={resetProfile} title="Clear overrides, forget this profile, fetch a fresh one">
                   ⟲ Reset profile (forget me)
                 </button>
               </div>
+            )}
+
+            {/* Advanced: force one experience at a time. Closed by default —
+                the Audience buttons above are the storytelling control; this
+                is for QA ("show me variant 2 of that one A/B test"). */}
+            {experiences.length > 0 && (
+              <>
+                <div
+                  style={{ ...s.stepLabel, cursor: 'pointer' }}
+                  onClick={() => setCollapsed((c) => ({ ...c, advanced: advancedOpen }))}
+                  title="Click to open / close"
+                >
+                  <span>Advanced · force a variant</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                    <span style={s.countBadge}>{experiences.length}</span>
+                    <span style={s.chev}>{advancedOpen ? '▾' : '▸'}</span>
+                  </span>
+                </div>
+                {advancedOpen && (
+                  <div style={s.ctrlBox}>
+                    {experiences.map((e) => {
+                      const f = forcedVariantFor(e.id)
+                      const variants = e.distribution.filter((d) => d.index > 0)
+                      const pct = (idx: number) => {
+                        const d = e.distribution.find((x) => x.index === idx)
+                        return d?.percentage !== undefined ? ` · ${d.percentage}% of traffic` : ''
+                      }
+                      const chip = (label: string, idx: number | null, title: string) => (
+                        <button
+                          key={String(idx)}
+                          onClick={() => forceVariant(e.id, idx)}
+                          style={{ ...s.segBtn, ...(f === idx ? s.segOn : null), padding: '2px 7px', fontSize: 9.5 }}
+                          title={title}
+                        >
+                          {label}
+                        </button>
+                      )
+                      return (
+                        <div key={e.id} style={s.ctrlRow}>
+                          <span style={{ ...s.ctrlLabel, fontSize: 10, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${e.name ?? e.id} (${e.type === 'nt_experiment' ? 'A/B test' : 'personalization'})`}>
+                            {e.type === 'nt_experiment' ? '⚖ ' : ''}
+                            {(e.name ?? e.id).replace(/^\[P13n\]\s*/, '')}
+                          </span>
+                          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                            {chip('Auto', null, 'Let the SDK decide (clear the override)')}
+                            {chip('Base', 0, `Force the baseline${pct(0)}`)}
+                            {variants.map((v) =>
+                              chip(`V${v.index}`, v.index, `Force ${v.name ?? `variant ${v.index}`}${pct(v.index)}`),
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.4)', lineHeight: 1.4 }}>
+                      Writes the SDK preview override. The page repaints only where it renders through the SDK
+                      (&lt;OptimizedEntry&gt;); host-decided content follows the Audience buttons instead.
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

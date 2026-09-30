@@ -12,8 +12,7 @@
 //
 // We use the PREVIEW host, because the variant entries are deliberately DRAFTS
 // (drafts-first publish gate) and the delivery API would silently drop them
-// from link resolution — the exact hollow the ninetailed-spa-debug lesson
-// warns about.
+// from link resolution.
 import { createClient } from 'contentful'
 import {
   createAudienceDefinitions,
@@ -24,13 +23,12 @@ import {
   type ExperienceDefinition,
 } from '@contentful/optimization-core/preview-support'
 
-const SPACE = import.meta.env.VITE_CONTENTFUL_SPACE_ID as string | undefined
-const ENV = (import.meta.env.VITE_CONTENTFUL_ENVIRONMENT_ID as string | undefined) ?? 'master'
-const CPA_TOKEN = import.meta.env.VITE_CONTENTFUL_PREVIEW_TOKEN as string | undefined
+import { hudConfig } from './config'
 
 export function previewContentfulClient() {
-  if (!SPACE || !CPA_TOKEN) return null
-  return createClient({ space: SPACE, environment: ENV, accessToken: CPA_TOKEN, host: 'preview.contentful.com' })
+  const { spaceId, environment, previewToken } = hudConfig()
+  if (!spaceId || !previewToken) return null
+  return createClient({ space: spaceId, environment, accessToken: previewToken, host: 'preview.contentful.com' })
 }
 
 export interface P13nDefinitions {
@@ -40,13 +38,16 @@ export interface P13nDefinitions {
    * nt_audience_id → audience ENTRY sys.id. Needed because the SDK's own
    * mappers live in two id spaces (observed 2026-08-15): AudienceDefinition.id
    * is the nt_audience_id FIELD (`aud-*`) while ExperienceDefinition.audience.id
-   * is the linked entry's SYS id (`ntaud-*` in this space). Without this map,
+   * is the linked entry's SYS id. Without this map,
    * audience→experience lookups silently match nothing — a classic hollow.
    */
   audienceSysIdByAudienceId: Record<string, string>
+  /** raw nt_experience entries — the override manager uses them to keep
+   * inline-variable (flag) values in sync with forced variants */
+  experienceEntries: unknown[]
 }
 
-const EMPTY: P13nDefinitions = { audiences: [], experiences: [], audienceSysIdByAudienceId: {} }
+const EMPTY: P13nDefinitions = { audiences: [], experiences: [], audienceSysIdByAudienceId: {}, experienceEntries: [] }
 
 declare global {
   interface Window {
@@ -75,6 +76,7 @@ export async function loadP13nDefinitions(): Promise<P13nDefinitions> {
       audiences: createAudienceDefinitions(audiences),
       experiences: createExperienceDefinitions(experiences),
       audienceSysIdByAudienceId,
+      experienceEntries: experiences.items as unknown[],
     }
     window.__optimizationDefinitions = defs
     return defs

@@ -23,6 +23,7 @@
 import {
   PreviewOverrideManager,
   type OverrideState,
+  type PreviewOverrideManagerConfig,
 } from '@contentful/optimization-core/preview-support'
 import { getPreviewPanelBridge } from '@contentful/optimization-core/bridge-support'
 import { getP13nDefinitions } from './optimization'
@@ -63,6 +64,7 @@ export function sdkAvailable(): boolean {
 let manager: PreviewOverrideManager | null = null
 let managerFor: unknown = null
 let overrides: Readonly<OverrideState> = { audiences: {}, selectedOptimizations: {} }
+const overrideListeners = new Set<(s: Readonly<OverrideState>) => void>()
 
 function overrideManager(): PreviewOverrideManager | null {
   const s = sdk()
@@ -74,8 +76,13 @@ function overrideManager(): PreviewOverrideManager | null {
       profile: bridge.profile,
       changes: bridge.changes,
       stateInterceptors: bridge.stateInterceptors,
+      // lets forced variants also move inline-variable (flag) values, as the
+      // official panel does; entry-replacement forcing works without it
+      optimizationEntries: () =>
+        getP13nDefinitions().experienceEntries as ReturnType<NonNullable<PreviewOverrideManagerConfig['optimizationEntries']>>,
       onOverridesChanged: (state) => {
         overrides = state
+        overrideListeners.forEach((fn) => fn(state))
       },
     })
     managerFor = s
@@ -86,6 +93,38 @@ function overrideManager(): PreviewOverrideManager | null {
 /** Current override state (audiences + forced variants), for display. */
 export function getOverrides(): Readonly<OverrideState> {
   return overrides
+}
+
+/** Re-render hook: called whenever any override changes (from any control). */
+export function subscribeOverrides(fn: (s: Readonly<OverrideState>) => void): () => void {
+  overrideListeners.add(fn)
+  return () => overrideListeners.delete(fn)
+}
+
+/** Forced variant index for one experience, or null when the SDK decides. */
+export function forcedVariantFor(experienceId: string): number | null {
+  const hit = Object.values(overrides.selectedOptimizations).find((o) => o.experienceId === experienceId)
+  return hit ? hit.variantIndex : null
+}
+
+/**
+ * Tell the SDK "a preview panel is attached / open" — exactly what the
+ * official panel does. This matters: the SDK's <OptimizedEntry> LOCKS the
+ * first variant it shows unless live updates are on, and it treats "preview
+ * panel open" as live updates ON. Without this, forcing a variant changes SDK
+ * state but the page does not repaint on hosts that did not enable
+ * `liveUpdates` (observed in the field as "the V1 buttons don't do anything").
+ */
+export function setPreviewPanelOpen(open: boolean): boolean {
+  const s = sdk()
+  if (!s) return false
+  const bridge = getPreviewPanelBridge(s) as unknown as {
+    previewPanelAttached?: { value: boolean }
+    previewPanelOpen?: { value: boolean }
+  }
+  if (bridge.previewPanelAttached) bridge.previewPanelAttached.value = true
+  if (bridge.previewPanelOpen) bridge.previewPanelOpen.value = open
+  return true
 }
 
 /** Experience ids targeting an audience — the override manager needs them.
@@ -102,7 +141,7 @@ function experienceIdsFor(audienceId: string): string[] {
 /**
  * TOUCHPOINT 1 — activate a persona:
  * reset every known audience override (a stale forced-off override blocks
- * later activations — the PGE lesson), force the target audience on via the
+ * later activations — learned the hard way), force the target audience on via the
  * override manager (sets its experiences to variant 1, exactly what the
  * preview panel's audience toggle does), and persist the declared trait with
  * identify() so it matches the audience's rules server-side and survives

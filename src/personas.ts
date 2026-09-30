@@ -1,15 +1,11 @@
 // Content-driven personas: the HUD reads `demoPersona` entries from the space
-// at boot (personas are CONTENT, not code — the HCA pattern). Absent
+// at boot (personas are CONTENT, not code — a reusable demo pattern). Absent
 // credentials or entries → returns null and the HUD falls back to the
 // audienceOptions the host app passed as props. Plain fetch, no SDK needed.
 //
-// Env contract (Vite): VITE_CONTENTFUL_SPACE_ID, VITE_CONTENTFUL_PREVIEW_TOKEN,
-// optional VITE_CONTENTFUL_ENVIRONMENT_ID (default master). Preview host so
-// draft personas show during authoring.
-
-const SPACE = import.meta.env.VITE_CONTENTFUL_SPACE_ID as string | undefined
-const ENV = (import.meta.env.VITE_CONTENTFUL_ENVIRONMENT_ID as string | undefined) ?? 'master'
-const CPA_TOKEN = import.meta.env.VITE_CONTENTFUL_PREVIEW_TOKEN as string | undefined
+// Connection comes from ./config (configureP13nHud() or Vite env vars).
+// Preview host so draft personas show during authoring.
+import { hudConfig } from './config'
 
 export type ContentPersona = {
   key: string
@@ -22,8 +18,9 @@ export type ContentPersona = {
 }
 
 export async function fetchPersonas(): Promise<ContentPersona[] | null> {
+  const { spaceId: SPACE, environment: ENV, previewToken: CPA_TOKEN, personaContentType } = hudConfig()
   if (!SPACE || !CPA_TOKEN) return null
-  const qs = new URLSearchParams({ content_type: 'demoPersona', limit: '25', access_token: CPA_TOKEN })
+  const qs = new URLSearchParams({ content_type: personaContentType, limit: '25', access_token: CPA_TOKEN })
   try {
     const res = await fetch(`https://preview.contentful.com/spaces/${SPACE}/environments/${ENV}/entries?${qs}`)
     if (!res.ok) {
