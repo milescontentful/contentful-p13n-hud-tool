@@ -5,7 +5,7 @@ page is showing what it's showing — in the order it happened:
 
 **① signals → ② audience → ③ decision trace → ④ selected variant (+ why)**
 
-![The HUD open beside the Meridian Outfitters home page: a ?utm_campaign=climb link has swapped the hero to "Built for the crux, not the catalog", and the panel shows the campaign signal, the climb audience, the decision trace with the Climbing rule matched, and the climbing hero as the selected variant](docs/images/meridian-climb.webp)
+![The HUD open beside the Meridian Outfitters home page: a ?utm_campaign=climb link has swapped the hero to "Built for the crux, not the catalog"; the panel's decision trace reads each campaign rule in plain English with this visitor's value (Campaign name equals "climb" → this visitor: climb, matched), and the selected-variant card lists why the baseline and the other two campaign heroes lost](docs/images/meridian-climb.webp)
 
 *Meridian Outfitters (a fictional brand) with a `?utm_campaign=climb` link: the page swapped its hero, and the HUD shows why.*
 
@@ -13,7 +13,7 @@ The decision trace is the part audiences remember: every rule, in order, marked
 **✓ matched · ✗ not matched · ∅ NO DATA** — because "we have no data on this visitor yet" is a
 different fact from "this visitor failed the rule", and saying so honestly is the trust moment.
 
-<img src="docs/images/decision-trace.webp" width="420" alt="Close-up of the decision trace: Climbing campaign rule matched (utm_campaign = climb from this page's URL, Experience API: audience joined); Family camping and Members rules not matched, each showing the value the rule wanted; the 50/50 A/B test matched with the half this visitor got">
+<img src="docs/images/decision-trace.webp" width="360" alt="Close-up of the decision trace and selected variant: Members and Family camping campaigns not matched (Campaign name equals &quot;members&quot; → this visitor: climb), Climbing campaign matched with Experience API: joined, the 50/50 A/B test with the half this visitor got; below, Why not the other version? gives one line per losing hero">
 
 It also does the job of Contentful's standard preview panel (force an audience, force a variant,
 see the live profile, reset) by driving the **same official override engine** the panel uses —
@@ -201,7 +201,7 @@ What it looks like — the same page, plain link vs campaign link:
 
 | Plain link — no campaign, so every rule reads **∅ NO DATA** | `?utm_campaign=climb` — the Climbing rule reads **✓ matched** |
 |---|---|
-| ![Meridian home page with the default hero "Gear for the long way around"; the HUD's decision trace marks all three campaign rules NO DATA and the selected variant is the baseline hero](docs/images/meridian-default.webp) | ![Meridian home page with the climbing hero "Built for the crux, not the catalog"; the HUD's decision trace marks the Climbing rule matched and the other two not matched](docs/images/meridian-climb.webp) |
+| ![Meridian home page with the default hero "Gear for the long way around"; the HUD's decision trace marks all three campaign rules NO DATA (this visitor: no campaign name on this visit) and the selected variant is the baseline hero](docs/images/meridian-default.webp) | ![Meridian home page with the climbing hero "Built for the crux, not the catalog"; the HUD's decision trace marks the Climbing rule matched and the other two not matched, each with this visitor's campaign value](docs/images/meridian-climb.webp) |
 
 A persona whose only job is "show the default" can be passed with `audienceNtId: null` — picking it
 forces every other persona's audience off, even on a campaign link.
@@ -298,7 +298,7 @@ the same entry (three campaign heroes on one home hero), the last variant you cl
 clears the other experiences' overrides for that entry first. Use `experienceFilter` to hide
 experiences you don't want offered (the Preview API also returns unpublished, retired ones).
 
-![Advanced · force a variant open on the Meridian home page: V1 is forced on the Members campaign hero, the page shows the members hero "Your early access to the Fall Line starts tonight", and the selected-variant note says a preview override is showing it](docs/images/meridian-force-variant.webp)
+![A variant forced from Advanced on the Meridian home page: the page shows the members hero "Your early access to the Fall Line starts tonight"; the selected-variant card says a preview override is showing it and Why not the other version? notes the override while the campaign rules read NO DATA; below, the operator controls as small icon buttons (audience personas, highlight, reset, forget profile, copy profile id)](docs/images/meridian-force-variant.webp)
 
 ## Files
 
