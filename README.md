@@ -77,8 +77,9 @@ import { OperatorHud } from 'contentful-p13n-hud-tool'
   traitKey="segment"                             // profile trait the persona sets
   selectedVariant={variantName}
   decisionReason="Returning-customer rule matched."
-  trace={[{ rule: 'Page views ≥ 3', outcome: 'matched', detail: 'pageViews = 5' }]}
   signals={[{ q: 'Page views this session', a: '5' }]}
+  cfEntryId={shownEntryId}                       // the entry on screen → provenance + "why not the other version?"
+  // no `trace` prop: the HUD builds the decision trace from your real audience rules
   onSwitchAudience={setPersonaKey}
   onReset={() => setPersonaKey('new-visitor')}
 />
@@ -90,6 +91,87 @@ Mark the personalized element with `data-p13n-target` so the **Highlight** butto
 operator controls, and (when the Optimization SDK is running on the page) the live profile plus a
 closed-by-default **Advanced · force a variant** section. Drag it anywhere; it remembers where you
 left it and which sections were folded, even across a reload. Esc closes it.
+
+Operator actions are small icon buttons — highlight the personalized element, reset to baseline,
+forget this profile, open the entry in Contentful, copy the profile id, minimize. Hover any of them
+for a tooltip; each has a screen-reader label and a visible focus ring, and every one is at least
+28 px square. The decision trace, signals and variant names stay as words.
+
+## The decision trace builds itself ("see the math")
+
+You don't write the trace. The HUD reads each audience's **real rule** (the `nt_rules` field on the
+`nt_audience` entry — `loadP13nDefinitions()` already fetches it), tests it against what this page
+knows about the visitor, and writes every condition out in plain English with the visitor's live value:
+
+```
+✓ Climbing campaign            matched
+    Campaign name equals "climb" → this visitor: climb ✓
+✗ Family camping campaign      not matched
+    Campaign name equals "family" → this visitor: climb ✗
+∅ Highly Engaged               NO DATA
+    Event contact_sales_clicked ≥ 1 → this visitor: no events yet ∅
+    or
+    Page URL contains "pricing" → this visitor: 0 of 1 page view ✗
+```
+
+**Which audiences:** the ones targeted by the experiences the HUD lists (after `experienceFilter`),
+or every audience if none are. Pass `traceAudiences={['aud-id', …]}` to choose. A/B tests with no
+audience get a row too: everyone is in it, and which half this visitor got (read from the SDK).
+
+**What it tests against (the "facts"):**
+
+| Fact | Where it comes from by default | Override with |
+|---|---|---|
+| Pages viewed + their UTM values | the HUD records one per page load (URL + `utm_*`) for the browser session | `facts.pages`, or call `recordPageFact()` on SPA route changes |
+| Events | whatever you record with `recordEventFact('name')` next to `sdk.track()` | `facts.events` |
+| Traits | the SDK profile's traits | `facts.traits` |
+| Audiences the server confirmed | the SDK profile's audiences — shown as "Experience API: joined" beside the math | `facts.confirmedAudiences` |
+
+**Supported rule types**
+
+| Rule (as the Personalization app writes it) | Reads as | Evaluated from |
+|---|---|---|
+| `page` + `context_campaign_name` (and `_source`/`_medium`/`_term`/`_content`) | Campaign name equals "climb" | the UTM values on pages this session |
+| `page` + `context_page_url` / `context_page_referrer` | Page URL contains "pricing" | page URLs this session |
+| `page` with a count (≥, >, ≤, <, =) | Viewed any page ≥ 3 times | how many pages match |
+| `track` (event name, or `*` for any) with a count | Event contact_sales_clicked ≥ 1 | recorded events |
+| `identify` (a trait) | Trait plan equals "pro" | profile traits |
+
+Condition operators: equals (`*` = anything), does not equal, contains, does not contain, starts
+with, ends with. Case doesn't matter.
+
+**What it will not guess.** Anything else shows **∅ can't evaluate here (rule type location)** —
+location, device, audience-of-audience, event property conditions, unknown operators or keys. A rule
+saved with `count` as a number (the format the platform silently ignores) says so too. Missing data is
+never counted as a failure: no campaign on this visit is **∅ NO DATA**, not **✗**.
+
+Groups combine the way the platform does: conditions inside a group all have to hold (AND); any one
+group is enough (OR). With three outcomes: one ✗ sinks a group, one ✓ group wins the audience,
+otherwise it's ∅.
+
+**Why not the other version?** Pass `cfEntryId` (the entry on screen) and the selected-variant card
+lists every other version that could have filled the same spot — the baseline plus each experience's
+variant for it — with one line on why it lost: the rule condition that failed or had no data, the
+traffic split, or an operator override.
+
+**Your own trace still wins.** Pass `trace={[…]}` and the HUD shows yours instead. The evaluator is
+also exported (`evaluateAudiences`, `audiencesFromEntries`, `evaluateRule`) if you want the math
+elsewhere.
+
+**Honest limit.** This is a local mirror of the platform's logic, for *explaining* a decision. The
+Experience API still makes the real decision. The HUD only knows what this browser saw this session,
+so a visitor who qualified on an earlier visit can read ∅ here while the server says "joined" —
+both are shown, side by side.
+
+**Selftest** (no dependencies, Node 23.6+):
+
+```sh
+node test/evaluate.selftest.ts
+```
+
+It runs real audience rules (copied from two Contentful spaces into `test/fixtures/`) through matched /
+not matched / no-data / can't-evaluate cases, then plants six bugs in a copy of the evaluator (for
+example "treat missing data as not matched") and fails unless every one of them is caught.
 
 ### Your first segment (link-driven — the easiest thing to demo)
 
@@ -223,6 +305,11 @@ experiences you don't want offered (the Preview API also returns unpublished, re
 | File | What it does |
 |---|---|
 | `src/OperatorHud.tsx` | the panel |
+| `src/evaluate.ts` | the rule evaluator behind the decision trace (pure — no React, no SDK) |
+| `src/facts.ts` | records pages / UTM / events this session for the evaluator |
+| `src/whyNot.ts` | "why not the other version?" reasons |
+| `src/icons.tsx` | the inline-SVG icon buttons (no icon library) |
+| `test/evaluate.selftest.ts` | evaluator selftest + planted-bug check |
 | `src/ntAdapter.ts` | every SDK call (persona activation, forcing, profile, reset) |
 | `src/optimization.ts` | loads nt_audience / nt_experience with the SDK's own mappers |
 | `src/personas.ts` | optional `demoPersona` content loader |

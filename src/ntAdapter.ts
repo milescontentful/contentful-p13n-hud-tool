@@ -249,3 +249,21 @@ export async function resetProfile(): Promise<boolean> {
   await s.page().catch(() => undefined)
   return true
 }
+
+// ---- which variant the SDK picked, per experience ---------------------------
+/** One experience's current pick (overrides applied), as the SDK holds it. */
+export type SdkSelection = { experienceId: string; variantIndex: number; variants?: Record<string, string> }
+
+/** The SDK's selected optimizations right now ([] when no SDK / none yet). */
+export function readSelections(): SdkSelection[] {
+  const v = sdk()?.states.selectedOptimizations.current
+  return Array.isArray(v) ? (v as SdkSelection[]) : []
+}
+
+/** Live updates of the SDK's selections. Returns an unsubscribe fn, or null. */
+export function subscribeSelections(next: (s: SdkSelection[]) => void): (() => void) | null {
+  const s = sdk()
+  if (!s) return null
+  const sub = s.states.selectedOptimizations.subscribe((v) => next(Array.isArray(v) ? (v as SdkSelection[]) : []))
+  return () => sub.unsubscribe()
+}

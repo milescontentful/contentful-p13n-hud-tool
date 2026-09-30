@@ -1,0 +1,187 @@
+{
+ "_source": "space 02 - Demo 2.1 (svs1g2yaeyzo) / master, nt_audience entries via CMA, read 2026-09-29",
+ "items": [
+  {
+   "sysId": "5lILmLr3SaVFyP9WTrIJwW",
+   "fields": {
+    "nt_name": {
+     "en-US": "Highly Engaged"
+    },
+    "nt_description": {
+     "en-US": "have engaged with product-specific actions, and may be sales ready"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "key": "",
+          "type": "track",
+          "count": "1",
+          "value": "contact_sales_clicked",
+          "operator": "greaterThanInclusive"
+         }
+        ]
+       },
+       {
+        "all": [
+         {
+          "key": "",
+          "type": "page",
+          "count": "1",
+          "value": "",
+          "operator": "greaterThanInclusive",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_page_url",
+             "key": "context_page_url",
+             "label": "URL",
+             "value": "",
+             "useOnce": true,
+             "category": {
+              "name": "url",
+              "type": "string",
+              "label": "URL"
+             }
+            },
+            "value": "pricing",
+            "operator": "contains"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_audience_id": {
+     "en-US": "5lILmLr3SaVFyP9WTrIJwW"
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin"
+     }
+    }
+   }
+  },
+  {
+   "sysId": "2rel1QFJDb6pFgxf6HjLK4",
+   "fields": {
+    "nt_name": {
+     "en-US": "All Visitors"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "type": "page",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_page_url",
+             "value": "",
+             "key": "context_page_url",
+             "category": {
+              "name": "url",
+              "label": "URL",
+              "type": "string"
+             },
+             "label": "URL",
+             "useOnce": true
+            },
+            "operator": "equal",
+            "value": "*"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "all": [
+         {
+          "type": "track",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "*",
+          "conditions": []
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_audience_id": {
+     "en-US": "2rel1QFJDb6pFgxf6HjLK4"
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin"
+     }
+    }
+   }
+  },
+  {
+   "sysId": "5tOdIfDQxtstG2x8kQcKiK",
+   "fields": {
+    "nt_name": {
+     "en-US": "Campaign"
+    },
+    "nt_description": {
+     "en-US": "This audience matches visitor who visit URLs with the query parameter ?utm_campaign=campaign"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "type": "page",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_campaign_name",
+             "value": "context_campaign_name",
+             "key": "context_campaign_name",
+             "category": {
+              "name": "utm_parameter",
+              "label": "UTM Parameter",
+              "type": "string"
+             },
+             "label": "Campaign Name",
+             "useOnce": true
+            },
+            "operator": "equal",
+            "value": "campaign"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_audience_id": {
+     "en-US": "5tOdIfDQxtstG2x8kQcKiK"
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -23,8 +23,16 @@ import {
   setPreviewPanelOpen,
   forceVariant as sdkForceVariant,
   resetProfile as sdkResetProfile,
+  getOverrides,
+  readSelections,
+  subscribeSelections,
   type SdkProfile,
+  type SdkSelection,
 } from './ntAdapter'
+import { audiencesFromEntries, evaluateAudiences, type VisitorFacts } from './evaluate'
+import { clearFacts, readEventFacts, readPageFacts, recordPageFact } from './facts'
+import { whyNotOthers } from './whyNot'
+import { HUD_CSS, Icon, IconButton } from './icons'
 import { getP13nDefinitions } from './optimization'
 import { fetchPersonas, type ContentPersona } from './personas'
 import { hudConfig } from './config'
@@ -57,8 +65,16 @@ export interface HudProps {
   traitKey: string
   selectedVariant: string
   decisionReason: string
-  /** optional deterministic rule trace — the "see the math" block */
+  /** optional: your own decision trace. Omit it and the HUD builds one from
+   * the REAL nt_audience rules + the visitor facts (see src/evaluate.ts). */
   trace?: TraceStep[]
+  /** optional: what the page knows about the visitor. Any field you omit is
+   * filled from the HUD's own session record (pages/UTM, recordEventFact
+   * events) and the SDK profile (traits, joined audiences). */
+  facts?: VisitorFacts
+  /** optional: which nt_audience ids the auto-trace covers (default: the
+   * audiences targeted by the experiences the HUD lists) */
+  traceAudiences?: string[]
   signals: HudSignal[]
   onSwitchAudience: (key: string) => void
   onReset: () => void
@@ -128,6 +144,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), M
 
 export function OperatorHud(p: HudProps) {
   const [open, setOpen] = useState(false)
+  // one page fact per page load (URL + utm_*) — the evaluator's raw material
+  useState(() => recordPageFact())
   // collapsed[sectionKey] = true → body hidden, header (with counts) remains
   // (restored from sessionStorage so a mid-demo reload keeps the layout)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadHudState().collapsed ?? {})
@@ -231,6 +249,14 @@ export function OperatorHud(p: HudProps) {
     const unsub = subscribeProfile(setProfile)
     return () => unsub?.()
   }, [open, sdkUp])
+  // which variant the SDK picked per experience (for the A/B rows + "why not")
+  const [selections, setSelections] = useState<SdkSelection[]>([])
+  useEffect(() => {
+    if (!open || !sdkUp) return
+    setSelections(readSelections())
+    const unsub = subscribeSelections(setSelections)
+    return () => unsub?.()
+  }, [open, sdkUp])
   // tell the SDK a preview panel is open → it repaints forced variants live
   // (same signal the official panel sends; see ntAdapter.setPreviewPanelOpen)
   useEffect(() => {
@@ -251,6 +277,9 @@ export function OperatorHud(p: HudProps) {
     // clears overrides, forgets the anonymous id, fires a page event so a
     // FRESH profile is fetched — all inside the adapter
     if (!(await sdkResetProfile())) return
+    // a forgotten profile starts from this page again — so do the facts
+    clearFacts()
+    recordPageFact()
     setProfile(readProfile())
   }
 
@@ -311,7 +340,7 @@ export function OperatorHud(p: HudProps) {
   const seg = <T extends string>(value: T, options: { v: T; label: string }[], onPick: (v: T) => void) => (
     <div style={s.segWrap}>
       {options.map((o) => (
-        <button key={o.v} onClick={() => onPick(o.v)} style={{ ...s.segBtn, ...(value === o.v ? s.segOn : null) }}>
+        <button key={o.v} type="button" className="p13n-hud-focus" aria-pressed={value === o.v} onClick={() => onPick(o.v)} style={{ ...s.segBtn, ...(value === o.v ? s.segOn : null) }}>
           {o.label}
         </button>
       ))}
@@ -323,6 +352,11 @@ export function OperatorHud(p: HudProps) {
     <div
       style={{ ...s.stepLabel, cursor: k ? 'pointer' : 'default' }}
       onClick={k ? () => setCollapsed((c) => ({ ...c, [k]: !c[k] })) : undefined}
+      onKeyDown={k ? (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setCollapsed((c) => ({ ...c, [k]: !c[k] }))) : undefined}
+      role={k ? 'button' : undefined}
+      tabIndex={k ? 0 : undefined}
+      aria-expanded={k ? !collapsed[k] : undefined}
+      className={k ? 'p13n-hud-focus' : undefined}
       title={k ? 'Click to collapse / expand' : undefined}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
@@ -336,11 +370,59 @@ export function OperatorHud(p: HudProps) {
     </div>
   )
 
-  const traceCount = p.trace?.length ?? 0
-  const variantStepNo = traceCount > 0 ? 4 : 3
   // experience graph mapped by the SDK's own nt_experience mappers
   const defs = getP13nDefinitions()
-  const experiences = sdkUp ? defs.experiences.filter((e) => !p.experienceFilter || p.experienceFilter(e)) : []
+  const listed = defs.experiences.filter((e) => !p.experienceFilter || p.experienceFilter(e))
+  const experiences = sdkUp ? listed : []
+
+  // ---- ③ the decision trace: built from the REAL nt_audience rules ----------
+  // (a host-supplied `trace` prop still wins — see evaluate.ts for the math)
+  const liveProfile = profile ?? (sdkUp ? readProfile() : null)
+  const facts: VisitorFacts = {
+    pages: p.facts?.pages ?? readPageFacts(),
+    events: p.facts?.events ?? readEventFacts(),
+    traits: p.facts?.traits ?? (liveProfile ? (liveProfile.traits ?? {}) : undefined),
+    confirmedAudiences: p.facts?.confirmedAudiences ?? liveProfile?.audiences,
+  }
+  const autoTrace: TraceStep[] = []
+  if (!p.trace) {
+    const all = audiencesFromEntries(defs.audienceEntries)
+    const wanted = p.traceAudiences ?? listed.map((e) => e.audience?.id).filter((x): x is string => !!x)
+    const traced = wanted.length ? all.filter((a) => wanted.includes(a.id) || (!!a.sysId && wanted.includes(a.sysId))) : all
+    autoTrace.push(...evaluateAudiences(traced, facts))
+    // A/B tests with no audience: everyone qualifies — show which half this visitor got
+    for (const e of listed.filter((x) => x.type === 'nt_experiment' && !x.audience)) {
+      const sel = selections.find((x) => x.experienceId === e.id)
+      const forced = forcedVariantFor(e.id) !== null
+      const share = (i: number) => {
+        const pc = e.distribution.find((d) => d.index === i)?.percentage
+        return pc !== undefined ? ` (${pc}%)` : ''
+      }
+      autoTrace.push({
+        rule: `A/B test: ${(e.name ?? e.id).replace(/^\[[^\]]+\]\s*/, '')}`,
+        outcome: 'matched',
+        detail: sel
+          ? `everyone is in it · this visitor got ${sel.variantIndex === 0 ? 'the baseline' : `V${sel.variantIndex}`}${share(sel.variantIndex)}${forced ? ' — operator override' : ''}`
+          : 'everyone is in it · the Experience API has not reported this visitor’s half yet',
+        conditions: [],
+      })
+    }
+  }
+  const trace = p.trace ?? autoTrace
+  const traceCount = trace.length
+  const variantStepNo = traceCount > 0 ? 4 : 3
+
+  // ---- "Why not the other version?" for the selected-variant card ------------
+  type RawExp = { sys?: { id?: string }; fields?: { nt_experience_id?: string; nt_name?: string; nt_type?: string } }
+  const rawListed = (defs.experienceEntries as RawExp[]).filter((e) => {
+    const id = e.fields?.nt_experience_id ?? e.sys?.id ?? ''
+    return !p.experienceFilter || p.experienceFilter({ id, name: e.fields?.nt_name, type: e.fields?.nt_type })
+  })
+  const ov = getOverrides()
+  const overrideActive = Object.keys(ov.audiences).length > 0 || Object.keys(ov.selectedOptimizations).length > 0
+  const alternatives = p.cfEntryId
+    ? whyNotOthers({ shownEntryId: p.cfEntryId, experiences: rawListed, trace, overrideActive })
+    : null
   const audienceName = (id: string) =>
     defs.audiences.find((a) => a.id === id || defs.audienceSysIdByAudienceId[a.id] === id)?.name ?? id
   const cfg = hudConfig()
@@ -349,7 +431,8 @@ export function OperatorHud(p: HudProps) {
   const extraSignals = (p.timeOfDay ? 1 : 0) + (p.locale ? 1 : 0)
 
   return (
-    <div ref={boxRef} style={{ ...s.panel, ...anchor }}>
+    <div ref={boxRef} style={{ ...s.panel, ...anchor }} data-p13n-hud>
+      <style>{HUD_CSS}</style>
       {/* header = drag handle; the minimize button stays put */}
       <div
         style={s.headRow}
@@ -370,9 +453,7 @@ export function OperatorHud(p: HudProps) {
           </div>
           <div style={s.sub}>Operator inspector · signals → audience → trace → variant → why · {p.surface}</div>
         </div>
-        <button style={s.iconBtn} title="Collapse (Esc)" onClick={() => setOpen(false)}>
-          –
-        </button>
+        <IconButton label="Minimize the HUD (Esc)" icon={Icon.minimize} onClick={() => setOpen(false)} testId="minimize" />
       </div>
 
       <div style={s.body}>
@@ -430,7 +511,7 @@ export function OperatorHud(p: HudProps) {
         </div>
 
         {/* 3 — decision trace: THE MATH. deterministic rules, three-state outcomes */}
-        {traceCount > 0 && p.trace && (
+        {traceCount > 0 && (
           <>
             <Connector />
             {stepHead(
@@ -442,26 +523,52 @@ export function OperatorHud(p: HudProps) {
             {!collapsed.trace && (
               <div style={s.block}>
                 <div style={s.traceLegend}>
-                  <span style={{ whiteSpace: 'nowrap' }}>Deterministic rules, in order —</span>{' '}
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    {p.trace ? 'Deterministic rules, in order —' : 'Your audience rules from Contentful, tested live —'}
+                  </span>{' '}
                   <span style={{ color: GREEN, whiteSpace: 'nowrap' }}>✓ matched</span>{' · '}
                   <span style={{ color: RED, whiteSpace: 'nowrap' }}>✗ not matched</span>{' · '}
                   <span style={{ color: AMBER, whiteSpace: 'nowrap' }}>∅ no data</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                  {p.trace.map((t, i) => {
+                  {trace.map((t, i) => {
                     const st = TRACE_STYLE[t.outcome]
                     return (
-                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }} data-hud-trace={t.outcome}>
                         <span style={{ fontSize: 12, fontWeight: 900, color: st.color, width: 14, flexShrink: 0 }}>
                           {st.mark}
                         </span>
-                        <div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ fontSize: 11.5, fontWeight: 700 }}>
                             {t.rule}{' '}
                             <span style={{ fontSize: 9.5, fontWeight: 800, color: st.color, letterSpacing: '0.05em' }}>
                               {st.label}
                             </span>
                           </div>
+                          {/* plain-English conditions with this visitor's live value */}
+                          {!!t.conditions?.length && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, margin: '3px 0 2px' }}>
+                              {t.conditions.map((c, j) => {
+                                const cs = TRACE_STYLE[c.outcome]
+                                const orBefore = j > 0 && c.group !== t.conditions![j - 1].group
+                                return (
+                                  <div key={j}>
+                                    {orBefore && <div style={s.orSep}>or</div>}
+                                    <div style={s.condRow} data-hud-condition={c.outcome}>
+                                      <span style={{ color: 'rgba(255,255,255,0.82)' }}>{c.text}</span>
+                                      <span style={{ color: 'rgba(255,255,255,0.4)' }}> → </span>
+                                      <span style={{ color: c.unsupported ? AMBER : 'rgba(255,255,255,0.62)' }}>
+                                        {c.unsupported ? c.observed : `this visitor: ${c.observed}`}
+                                      </span>{' '}
+                                      <span style={{ color: cs.color, fontWeight: 900 }} title={cs.label}>
+                                        {cs.mark}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                           <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontFamily: 'ui-monospace, monospace' }}>
                             {t.detail}
                           </div>
@@ -482,11 +589,31 @@ export function OperatorHud(p: HudProps) {
         <div style={s.block}>
           <div style={s.kv}>
             <code style={s.code}>{p.selectedVariant}</code>
-            <button style={s.showBtn} onClick={highlightPersonalized}>
-              Highlight
-            </button>
+            <span style={{ marginLeft: 'auto' }}>
+              <IconButton label="Highlight the personalized element on the page" icon={Icon.highlight} onClick={highlightPersonalized} tone="accent" testId="highlight" />
+            </span>
           </div>
           <div style={s.why}>{p.decisionReason}</div>
+          {/* why the other versions of this slot lost — one line each */}
+          {!!alternatives?.length && (
+            <div style={s.whyNot} data-hud-whynot>
+              <div style={s.entryFootLabel}>Why not the other version?</div>
+              {alternatives.map((a, i) => {
+                const st = TRACE_STYLE[a.outcome]
+                return (
+                  <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline', fontSize: 10.5, lineHeight: 1.45 }}>
+                    <span style={{ color: st.color, fontWeight: 900, width: 11, flexShrink: 0 }} title={st.label}>
+                      {st.mark}
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>{a.label}</span>
+                      <span style={{ color: 'rgba(255,255,255,0.55)' }}> — {a.reason}</span>
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
           {/* provenance: this pixel came from this entry */}
           {p.contentSource !== 'fixture' && p.cfEntryId && cfg.spaceId ? (
             <div style={s.entryFoot}>
@@ -496,14 +623,13 @@ export function OperatorHud(p: HudProps) {
                   {p.cfEntryId}
                 </code>
               </div>
-              <a
+              <IconButton
+                label="Open this entry in Contentful (new tab)"
+                icon={Icon.external}
                 href={`https://app.contentful.com/spaces/${cfg.spaceId}/environments/${cfg.environment}/entries/${p.cfEntryId}`}
-                target="_blank"
-                rel="noreferrer"
-                style={s.cfBtn}
-              >
-                Open in Contentful ↗
-              </a>
+                tone="accent"
+                testId="open-entry"
+              />
             </div>
           ) : (
             <div style={s.entryFoot}>
@@ -531,7 +657,11 @@ export function OperatorHud(p: HudProps) {
                   return (
                     <button
                       key={o.key}
+                      type="button"
+                      className="p13n-hud-focus"
                       title={m.label}
+                      aria-label={`Switch audience: ${m.label}`}
+                      aria-pressed={on}
                       onClick={() => switchAudience(o.key)}
                       style={{
                         ...s.personaBtn,
@@ -588,9 +718,16 @@ export function OperatorHud(p: HudProps) {
               !!p.experienceStateOptions?.length &&
               p.onSetExperienceState &&
               row('Experience state', seg(p.experienceState, p.experienceStateOptions, p.onSetExperienceState))}
-            <button style={s.resetBtn} onClick={reset}>
-              ⟲ Reset to baseline
-            </button>
+            {row(
+              'Actions',
+              <div style={{ display: 'flex', gap: 6 }}>
+                <IconButton label="Highlight the personalized element" icon={Icon.highlight} onClick={highlightPersonalized} testId="highlight-2" />
+                <IconButton label="Reset to baseline (clear every override)" icon={Icon.reset} onClick={reset} testId="reset" />
+                {sdkUp && (
+                  <IconButton label="Reset profile — forget this visitor and fetch a fresh profile" icon={Icon.forget} onClick={resetProfile} testId="reset-profile" />
+                )}
+              </div>,
+            )}
           </div>
         )}
 
@@ -607,13 +744,17 @@ export function OperatorHud(p: HudProps) {
               <div style={s.ctrlBox}>
                 <div style={s.ctrlRow}>
                   <span style={s.ctrlLabel}>Profile id</span>
-                  <code
-                    style={{ ...s.entryId, cursor: 'copy' }}
-                    title={profile ? `${profile.id} — click to copy` : 'loading profile…'}
-                    onClick={() => profile && navigator.clipboard?.writeText(profile.id)}
-                  >
-                    {profile ? `${profile.id.slice(0, 14)}…` : '…'}
-                  </code>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <code style={s.entryId} title={profile?.id ?? 'loading profile…'}>
+                      {profile ? `${profile.id.slice(0, 14)}…` : '…'}
+                    </code>
+                    <IconButton
+                      label="Copy the profile id"
+                      icon={Icon.copy}
+                      onClick={() => profile && navigator.clipboard?.writeText(profile.id)}
+                      testId="copy-profile"
+                    />
+                  </span>
                 </div>
                 <div style={s.ctrlRow}>
                   <span style={s.ctrlLabel}>Audiences</span>
@@ -631,9 +772,6 @@ export function OperatorHud(p: HudProps) {
                       : 'none'}
                   </span>
                 </div>
-                <button style={s.resetBtn} onClick={resetProfile} title="Clear overrides, forget this profile, fetch a fresh one">
-                  ⟲ Reset profile (forget me)
-                </button>
               </div>
             )}
 
@@ -645,6 +783,11 @@ export function OperatorHud(p: HudProps) {
                 <div
                   style={{ ...s.stepLabel, cursor: 'pointer' }}
                   onClick={() => setCollapsed((c) => ({ ...c, advanced: advancedOpen }))}
+                  onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setCollapsed((c) => ({ ...c, advanced: advancedOpen })))}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={advancedOpen}
+                  className="p13n-hud-focus"
                   title="Click to open / close"
                 >
                   <span>Advanced · force a variant</span>
@@ -665,9 +808,13 @@ export function OperatorHud(p: HudProps) {
                       const chip = (label: string, idx: number | null, title: string) => (
                         <button
                           key={String(idx)}
+                          type="button"
+                          className="p13n-hud-focus"
                           onClick={() => forceVariant(e.id, idx)}
-                          style={{ ...s.segBtn, ...(f === idx ? s.segOn : null), padding: '2px 7px', fontSize: 9.5 }}
+                          style={{ ...s.segBtn, ...(f === idx ? s.segOn : null), padding: '2px 7px', fontSize: 9.5, minHeight: 28 }}
                           title={title}
+                          aria-label={`${title} — ${(e.name ?? e.id).replace(/^\[[^\]]+\]\s*/, '')}`}
+                          aria-pressed={f === idx}
                         >
                           {label}
                         </button>
@@ -736,11 +883,6 @@ const s: Record<string, React.CSSProperties> = {
   body: { overflowY: 'auto', padding: '0 16px 16px' },
   title: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, fontWeight: 800 },
   sub: { fontSize: 10.5, color: 'rgba(255,255,255,0.55)', marginTop: 3 },
-  iconBtn: {
-    width: 24, height: 24, borderRadius: 7, border: '1px solid rgba(255,255,255,0.14)',
-    background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: 13,
-    flexShrink: 0,
-  },
   dot: { width: 9, height: 9, borderRadius: '50%', flexShrink: 0 },
   liveChip: {
     display: 'inline-flex', alignItems: 'center', padding: '1px 7px', borderRadius: 99,
@@ -777,12 +919,17 @@ const s: Record<string, React.CSSProperties> = {
     background: 'rgba(255,255,255,0.1)', color: '#e2e8f0',
   },
   why: { marginTop: 8, fontSize: 11.5, lineHeight: 1.5, color: 'rgba(255,255,255,0.75)' },
+  whyNot: {
+    marginTop: 9, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.1)',
+    display: 'flex', flexDirection: 'column', gap: 3,
+  },
+  condRow: { fontSize: 10.5, lineHeight: 1.45, overflowWrap: 'anywhere' },
+  orSep: {
+    fontSize: 8.5, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.35)', margin: '1px 0',
+  },
   traceLegend: {
     fontSize: 9.5, fontWeight: 700, color: 'rgba(255,255,255,0.45)', marginBottom: 8, lineHeight: 1.4,
-  },
-  showBtn: {
-    marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, border: `1px solid ${ACCENT}`,
-    background: `${ACCENT}22`, color: '#7FE9F1', fontSize: 11, fontWeight: 700, cursor: 'pointer',
   },
   entryFoot: {
     marginTop: 10, paddingTop: 9, borderTop: '1px solid rgba(255,255,255,0.1)',
@@ -798,11 +945,6 @@ const s: Record<string, React.CSSProperties> = {
     whiteSpace: 'nowrap', display: 'inline-block', maxWidth: 160, verticalAlign: 'bottom',
   },
   entryFootHint: { fontSize: 10, lineHeight: 1.5, color: 'rgba(255,255,255,0.45)' },
-  cfBtn: {
-    flexShrink: 0, padding: '5px 10px', borderRadius: 8, border: `1px solid ${ACCENT}`,
-    background: `${ACCENT}22`, color: '#7FE9F1', fontSize: 10.5, fontWeight: 800, cursor: 'pointer',
-    textDecoration: 'none', whiteSpace: 'nowrap',
-  },
   divider: { marginTop: 14, borderTop: '1px solid rgba(255,255,255,0.1)' },
   ctrlBox: {
     display: 'flex', flexDirection: 'column', gap: 10, padding: '12px', borderRadius: 11,
@@ -824,11 +966,6 @@ const s: Record<string, React.CSSProperties> = {
   personaBtn: {
     width: 32, height: 32, borderRadius: 9, borderWidth: 1, borderStyle: 'solid', fontSize: 14, cursor: 'pointer',
     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  },
-  resetBtn: {
-    marginTop: 2, padding: '7px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.16)',
-    background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.75)', fontSize: 11.5, fontWeight: 700,
-    cursor: 'pointer',
   },
   foot: {
     marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 10,

@@ -1,0 +1,170 @@
+{
+ "_source": "space 0 - Meridian Outfitters (2p5diqrd23ie) / master, the 3 UTM campaign audiences via CMA, read 2026-09-29",
+ "items": [
+  {
+   "sysId": "p13n-aud-utm-members",
+   "fields": {
+    "nt_name": {
+     "en-US": "Members campaign"
+    },
+    "nt_description": {
+     "en-US": "Arrived on a link tagged ?utm_campaign=members."
+    },
+    "nt_audience_id": {
+     "en-US": "p13n-aud-utm-members"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "type": "page",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_campaign_name",
+             "value": "context_campaign_name",
+             "key": "context_campaign_name",
+             "category": {
+              "name": "utm_parameter",
+              "label": "UTM Parameter",
+              "type": "string"
+             },
+             "label": "Campaign Name",
+             "useOnce": true
+            },
+            "operator": "equal",
+            "value": "members"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin",
+      "seededBy": "archetypes/ref-marketing/scripts/seed-p13n.mjs"
+     }
+    }
+   }
+  },
+  {
+   "sysId": "p13n-aud-utm-family",
+   "fields": {
+    "nt_name": {
+     "en-US": "Family camping campaign"
+    },
+    "nt_description": {
+     "en-US": "Arrived on a link tagged ?utm_campaign=family."
+    },
+    "nt_audience_id": {
+     "en-US": "p13n-aud-utm-family"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "type": "page",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_campaign_name",
+             "value": "context_campaign_name",
+             "key": "context_campaign_name",
+             "category": {
+              "name": "utm_parameter",
+              "label": "UTM Parameter",
+              "type": "string"
+             },
+             "label": "Campaign Name",
+             "useOnce": true
+            },
+            "operator": "equal",
+            "value": "family"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin",
+      "seededBy": "archetypes/ref-marketing/scripts/seed-p13n.mjs"
+     }
+    }
+   }
+  },
+  {
+   "sysId": "p13n-aud-utm-climb",
+   "fields": {
+    "nt_name": {
+     "en-US": "Climbing campaign"
+    },
+    "nt_description": {
+     "en-US": "Arrived on a link tagged ?utm_campaign=climb."
+    },
+    "nt_audience_id": {
+     "en-US": "p13n-aud-utm-climb"
+    },
+    "nt_rules": {
+     "en-US": {
+      "any": [
+       {
+        "all": [
+         {
+          "type": "page",
+          "count": "1",
+          "key": "",
+          "operator": "greaterThanInclusive",
+          "value": "",
+          "conditions": [
+           {
+            "key": {
+             "id": "context_campaign_name",
+             "value": "context_campaign_name",
+             "key": "context_campaign_name",
+             "category": {
+              "name": "utm_parameter",
+              "label": "UTM Parameter",
+              "type": "string"
+             },
+             "label": "Campaign Name",
+             "useOnce": true
+            },
+            "operator": "equal",
+            "value": "climb"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "nt_metadata": {
+     "en-US": {
+      "type": "origin",
+      "seededBy": "archetypes/ref-marketing/scripts/seed-p13n.mjs"
+     }
+    }
+   }
+  }
+ ]
+}
