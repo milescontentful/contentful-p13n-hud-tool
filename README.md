@@ -15,6 +15,21 @@ so you run one panel on screen, built for storytelling instead of debugging.
 
 This repo is the master copy. It ships as TypeScript source for **Vite + React** apps.
 
+**Who it's for:** anyone demoing or building with Contentful Personalization — solutions engineers,
+partners, developers, Contentful employees. No private tooling needed; everything below works from a
+fresh Vite + React app and a Contentful space you can edit.
+
+## Before you start (one-time, in Contentful)
+
+1. **Install the Contentful Personalization app** in your space (Apps → Marketplace → Contentful
+   Personalization) and, on its **Data buckets** tab, pick a data bucket and **Save**. This is a click in
+   the app's own screen — it can't be scripted. Until it's done, audiences never evaluate.
+2. **Check the `nt_audience` / `nt_experience` fields use the app's editors** (the rule builder, not a raw
+   JSON box). If you created these content types by script, copy their editor settings from a space
+   where the app set them up.
+3. **Have at least one audience with a rule in the working format** (see *Your first segment* below).
+
+
 ---
 
 ## 5-minute quick start
@@ -70,6 +85,30 @@ operator controls, and (when the Optimization SDK is running on the page) the li
 closed-by-default **Advanced · force a variant** section. Drag it anywhere; it remembers where you
 left it and which sections were folded, even across a reload. Esc closes it.
 
+### Your first segment (link-driven — the easiest thing to demo)
+
+Campaign links are the quickest win: a presenter clicks `?utm_campaign=climb` and the page changes, no
+waiting for "3 visits". The audience rule (the `nt_rules` field on an `nt_audience` entry, or build it in
+the app's rule builder):
+
+```json
+{"any":[{"all":[{"type":"page","count":"1","key":"","operator":"greaterThanInclusive","value":"",
+  "conditions":[{"key":{"id":"context_campaign_name","value":"context_campaign_name","key":"context_campaign_name",
+  "category":{"name":"utm_parameter","label":"UTM Parameter","type":"string"},"label":"Campaign Name","useOnce":true},
+  "operator":"equal","value":"climb"}]}]}]}
+```
+
+Then pass the campaign to the SDK yourself — it does not read `utm_*` from the URL on its own:
+
+```ts
+const q = new URLSearchParams(location.search)
+const campaign = Object.fromEntries(['source','medium','campaign','term','content']
+  .map(k => [k === 'campaign' ? 'name' : k, q.get(`utm_${k}`)]).filter(([, v]) => v))
+sdk.page({ campaign })   // after the SDK is live — see the preflight checklist
+```
+
+Open the link in a fresh (private) window each time — the profile remembers you.
+
 ### Optional rows
 
 Every extra control appears **only when you wire it** — no buttons that do nothing:
@@ -95,7 +134,7 @@ editors can rename personas without a code change. Content type id is configurab
 
 ## Preflight checklist (the landmines)
 
-Both of the first two were found by watching real pages fail silently — nothing errors, the swap
+All of these were found by watching real pages fail silently — nothing errors, the swap
 just never happens.
 
 - [ ] **Fire the first page event after the SDK is live.** A `page()` call made during the first
@@ -104,6 +143,11 @@ just never happens.
 - [ ] **Two id spaces for audiences.** The SDK's `AudienceDefinition.id` is the `nt_audience_id`
   *field*, but `ExperienceDefinition.audience.id` is the audience entry's *sys id*.
   `loadP13nDefinitions()` builds the bridge between them; if you roll your own loader, do the same.
+- [ ] **Write rules in the format the platform actually evaluates.** `count` must be a **string**
+  (`"1"`, not `1`) and each rule needs `"key": ""` and `"value": ""` (not `null`). The number/null form
+  saves fine and is then silently ignored — the audience never matches anyone, with no error.
+- [ ] **Pass UTM values yourself.** The SDK sends an empty `campaign` object even on a
+  `?utm_campaign=` URL; read `utm_*` from the URL and pass them to `sdk.page()`.
 - [ ] **Load definitions from the Preview API.** Variant entries are often drafts; the Delivery
   API silently drops them, so forcing controls would show nothing.
 - [ ] **Don't attach `@contentful/optimization-web-preview-panel` as well.** Two panels driving
@@ -163,3 +207,22 @@ decides itself (its own rules) follows the persona buttons instead.
 | `src/personas.ts` | optional `demoPersona` content loader |
 | `src/config.ts` | connection settings (env vars or `configureP13nHud`) |
 | `src/index.ts` | public exports |
+
+---
+
+## Troubleshooting
+
+| You see | Likely cause | Fix |
+|---|---|---|
+| The A/B test splits but no audience ever matches | Rule written with `count` as a number or `null` key/value | Rewrite in the string format above (or rebuild it in the app's rule builder) |
+| Campaign link shows the default page | UTM not passed to `sdk.page()`, or you've visited before | Pass `utm_*` (see *Your first segment*); test in a private window |
+| "Returning visitor" never kicks in | First page event fired before the SDK was live | Call `sdk.page()` only after `useOptimizationContext()` reports the live SDK |
+| Forcing a variant changes nothing on screen | Component not rendered through `<OptimizedEntry>`, or another preview panel is also attached | Render personalized entries through the SDK; use one panel |
+| Forcing controls list nothing | Variants are drafts and definitions came from the Delivery API | `loadP13nDefinitions()` uses the Preview API — set a preview token |
+| "Configuration needed" banner in the Personalization app | App settings incomplete (often analytics content types) | Harmless for on-site swapping once a data bucket is saved; finish the app's setup checklist for analytics |
+| Audience shows as a raw JSON box in the editor | Content type created by script without the app's editor settings | Copy editor settings from a space the app configured |
+
+## Feedback and contributions
+
+Issues and pull requests welcome. Personalization's SDK is young and moving fast — if something here
+stops matching what you see, open an issue with the SDK version and what the Experience API returned.
