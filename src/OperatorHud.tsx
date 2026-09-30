@@ -82,6 +82,9 @@ export interface HudProps {
   entryPoint?: string
   entryPointOptions?: SegOption[]
   onSetEntryPoint?: (e: string) => void
+  /** optional: which experiences the Advanced list offers (e.g. hide retired
+   * drafts — the Preview API returns unpublished entries too) */
+  experienceFilter?: (e: { id: string; name?: string; type?: string }) => boolean
 }
 
 // ---- Optimization SDK surface -----------------------------------------------
@@ -337,7 +340,7 @@ export function OperatorHud(p: HudProps) {
   const variantStepNo = traceCount > 0 ? 4 : 3
   // experience graph mapped by the SDK's own nt_experience mappers
   const defs = getP13nDefinitions()
-  const experiences = sdkUp ? defs.experiences : []
+  const experiences = sdkUp ? defs.experiences.filter((e) => !p.experienceFilter || p.experienceFilter(e)) : []
   const audienceName = (id: string) =>
     defs.audiences.find((a) => a.id === id || defs.audienceSysIdByAudienceId[a.id] === id)?.name ?? id
   const cfg = hudConfig()
@@ -671,7 +674,7 @@ export function OperatorHud(p: HudProps) {
                       )
                       return (
                         <div key={e.id} style={s.ctrlRow}>
-                          <span style={{ ...s.ctrlLabel, fontSize: 10, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${e.name ?? e.id} (${e.type === 'nt_experiment' ? 'A/B test' : 'personalization'})`}>
+                          <span style={{ ...s.ctrlLabel, fontSize: 10, minWidth: 0, flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${e.name ?? e.id} (${e.type === 'nt_experiment' ? 'A/B test' : 'personalization'})`}>
                             {e.type === 'nt_experiment' ? '⚖ ' : ''}
                             {(e.name ?? e.id).replace(/^\[P13n\]\s*/, '')}
                           </span>
